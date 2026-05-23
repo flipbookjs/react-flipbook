@@ -1,6 +1,7 @@
 {
   "name": "flipbookjs",
   "private": true,
+  "type": "module",
   "workspaces": [
     "packages/*",
     "demo"
