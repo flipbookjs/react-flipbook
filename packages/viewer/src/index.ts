@@ -14,6 +14,11 @@ export type {
   OutlineItem,
 } from './types/PageSource';
 
+// Spread data shape — stable across Step 2 and beyond. Internal reducer state
+// (FlipbookState/FlipbookAction) stays unexported until the action set
+// stabilizes after Steps 3–6 (parent plan Review-Log #21).
+export type { Spread } from './core/computeSpreads';
+
 // Adapters
 export { PdfjsSource } from './adapters/PdfjsSource';
 export type { PdfjsSourceOptions } from './adapters/PdfjsSource';
