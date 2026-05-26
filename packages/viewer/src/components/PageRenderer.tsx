@@ -1,5 +1,6 @@
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useContext } from 'react';
 import type { PageSource } from '../types/PageSource';
+import { PageRegistryWriteContext } from '../core/PageRegistry';
 
 interface PageRendererProps {
   source: PageSource;
@@ -9,6 +10,8 @@ interface PageRendererProps {
 
 export function PageRenderer({ source, pageIndex, scale }: PageRendererProps) {
   const canvasHostRef = useRef<HTMLDivElement>(null);
+  const pageDivRef = useRef<HTMLDivElement>(null);
+  const registry = useContext(PageRegistryWriteContext);
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState<Error | null>(null);
 
@@ -64,6 +67,11 @@ export function PageRenderer({ source, pageIndex, scale }: PageRendererProps) {
         canvasHost.textContent = '';
         canvasHost.appendChild(canvas);
         setState('ready');
+        // Register with PageRegistry per architectural plan Decision 3.
+        // Optional chaining: works without provider (tests, isolated usage).
+        if (pageDivRef.current) {
+          registry?.register(pageIndex, { canvas, element: pageDivRef.current });
+        }
       })
       .catch((err) => {
         if (err.name === 'AbortError') return;
@@ -73,6 +81,8 @@ export function PageRenderer({ source, pageIndex, scale }: PageRendererProps) {
 
     return () => {
       abortController.abort();
+      // Unregister from PageRegistry per architectural plan Decision 3.
+      registry?.unregister(pageIndex);
       // Release canvas memory (hard-problem #8)
       canvasHost?.querySelectorAll('canvas').forEach((c) => {
         c.width = 0;
@@ -83,6 +93,7 @@ export function PageRenderer({ source, pageIndex, scale }: PageRendererProps) {
 
   return (
     <div
+      ref={pageDivRef}
       className="fbjs-page"
       role="img"
       aria-label={`Page ${pageIndex + 1}`}
