@@ -207,7 +207,17 @@ describe('useCurlRenderCallback', () => {
     expect(ctx2d.translate).toHaveBeenCalled();
   });
 
-  it('does NOT paint idle-spine when state is idle but committed (commit just finished)', () => {
+  it('paints idle-spine even when committed=true (post-commit canvas must clear residual frame)', () => {
+    // Previously this test asserted the opposite — that committed=true skipped
+    // the idle-spine render to preserve the final curl frame. That preservation
+    // turned out to be the source of a visible artifact: any sub-pixel AA edge
+    // from the flipping-page polygon clip stayed visible as a hairline outlining
+    // the page perimeter, persisting until the next curl. Removing the early-return
+    // for committed=true clears the canvas immediately after commit. The "flash"
+    // concern that motivated the original behavior doesn't apply: GO_TO_SPREAD is
+    // dispatched synchronously, React batches the snapshot + spread updates, and
+    // useLayoutEffect runs before paint — so canvas clear + new spread DOM land
+    // in the same frame.
     const actions = makeActions();
     const overlayCanvas = document.createElement('canvas');
     const ctx2d = overlayCanvas.getContext('2d') as CanvasRenderingContext2D;
@@ -229,7 +239,11 @@ describe('useCurlRenderCallback', () => {
       });
     });
 
-    expect(ctx2d.translate).not.toHaveBeenCalled();
+    // drawSpineShadow translates the context to center the gradient on the spine.
+    // Observing translate confirms the spine-shadow path executed, which in turn
+    // implies the prior clearRect (lines 180-181 of useCurlRenderCallback) ran.
+    expect(ctx2d.translate).toHaveBeenCalled();
+    expect(ctx2d.clearRect).toHaveBeenCalled();
   });
 
   it('catches throws inside the render closure and cancels the animation (Decision 14)', () => {

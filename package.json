@@ -10,7 +10,7 @@
     "dev": "cd demo && npm run dev",
     "build": "cd packages/viewer && npm run build",
     "test": "vitest run",
-    "lint": "eslint packages/*/src/**/*.{ts,tsx}"
+    "lint": "eslint 'packages/*/src/**/*.{ts,tsx}' 'demo/src/**/*.{ts,tsx}'"
   },
   "devDependencies": {
     "@microsoft/api-extractor": "^7.58.7",

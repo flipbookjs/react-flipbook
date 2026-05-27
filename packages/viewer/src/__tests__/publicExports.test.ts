@@ -54,6 +54,7 @@ describe('public API exports', () => {
     const outline: OutlineItem = { title: 't', pageIndex: 0 };
     const opts: PdfjsSourceOptions = {};
     const props: FlipbookProps = {};
+    const propsWithCurl: FlipbookProps = { enablePageCurl: true };
 
     expect(spread.right).toBe(0);
     expect(spread.left).toBeNull();
@@ -62,6 +63,7 @@ describe('public API exports', () => {
     expect(outline.title).toBe('t');
     expect(opts).toEqual({});
     expect(props).toEqual({});
+    expect(propsWithCurl.enablePageCurl).toBe(true);
   });
 
   it('PageSource is a structural interface', () => {

@@ -192,18 +192,29 @@ export const renderCurlFrame = (input: CurlRenderInput): void => {
     // visual definition on solid-color pages (e.g. mostly-white) where the shadows
     // alone don't distinguish the curl from the page underneath. Drawn LAST so
     // it sits on top of everything else.
+    //
+    // Opacity fades to zero by progress = STROKE_FADE_END (well below 1.0) so the
+    // post-commit "final frame" preserved by useCurlRenderCallback (committed-state
+    // retention to avoid a flash) doesn't leave a residual page outline visible
+    // until the next curl. The animation's last rAF tick typically lands at
+    // progress ≈ 0.98-0.99 due to scheduling, not exactly 1.0, so the fade must
+    // complete well before 1.0 to fully clear the stroke at commit time.
+    const STROKE_FADE_END = 0.85;
     if (showShadows && flippingClip.length > 0) {
-        ctx.save();
-        ctx.strokeStyle = 'rgba(0, 0, 0, 0.18)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(flippingClip[0].x, flippingClip[0].y);
-        for (let i = 1; i < flippingClip.length; i++) {
-            ctx.lineTo(flippingClip[i].x, flippingClip[i].y);
+        const strokeOpacity = 0.18 * Math.max(0, (STROKE_FADE_END - curl.progress) / STROKE_FADE_END);
+        if (strokeOpacity > 0.005) {
+            ctx.save();
+            ctx.strokeStyle = `rgba(0, 0, 0, ${strokeOpacity})`;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(flippingClip[0].x, flippingClip[0].y);
+            for (let i = 1; i < flippingClip.length; i++) {
+                ctx.lineTo(flippingClip[i].x, flippingClip[i].y);
+            }
+            ctx.closePath();
+            ctx.stroke();
+            ctx.restore();
         }
-        ctx.closePath();
-        ctx.stroke();
-        ctx.restore();
     }
 
 };

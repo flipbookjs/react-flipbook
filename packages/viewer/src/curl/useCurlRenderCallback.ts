@@ -163,13 +163,21 @@ export const useCurlRenderCallback = (params: UseCurlRenderCallbackParams): void
   }, [actions, degraded]);
 
   // Idle-state spine shadow (Decision 5).
+  //
+  // Always clear and redraw on idle, regardless of committed. The previous
+  // behavior (preserve last frame on committed=true) was meant to avoid a
+  // one-frame "flash" when transitioning from animating → idle, but it left
+  // the final-frame paint visible indefinitely — including any sub-pixel AA
+  // edge from the flipping-page polygon clip, which appeared as a hairline
+  // outlining the page perimeter until the next curl. The "flash" concern
+  // doesn't actually apply: commit() dispatches GO_TO_SPREAD synchronously,
+  // the snapshot update is batched in the same React render, and the canvas
+  // clear in useLayoutEffect runs after DOM mutation but before browser paint
+  // — so the new spread DOM and the cleared canvas update in the same frame.
   useLayoutEffect(() => {
     if (degraded) return;
     if (snapshot.state !== 'idle') return;
     if (!overlayRect) return;
-    // After a committed curl, the canvas already shows the final curl frame.
-    // Don't overwrite it — the next gesture's render callback clears naturally.
-    if (snapshot.committed) return;
 
     const canvas = overlayRef.current;
     if (!canvas) return;

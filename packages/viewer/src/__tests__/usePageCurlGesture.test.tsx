@@ -115,6 +115,37 @@ describe('usePageCurlGesture — corner hit-test + setPointerCapture', () => {
     expect(actions.updateDrag).toHaveBeenCalledTimes(1);
   });
 
+  it('tap on bottom-right corner (pointerdown+pointerup at same position) triggers animated next-curl', () => {
+    // Tap detection: pointerup within TAP_MOVE_THRESHOLD_PX (5) of pointerdown
+    // routes through cancel() + startAnimatedCurl instead of endDrag (which
+    // would spring back because progress < commitThreshold on a zero-distance
+    // drag). Architectural plan Checklist item 13: "Click bottom-right corner
+    // → curl forward."
+    renderHook(() => usePageCurlGesture(makeParams()));
+    dispatchPointerEvent(stage, 'pointerdown', 1150, 750);
+    dispatchPointerEvent(stage, 'pointerup', 1150, 750); // identical position → tap
+    expect(actions.cancel).toHaveBeenCalledTimes(1);
+    expect(actions.startAnimatedCurl).toHaveBeenCalledWith('next');
+    expect(actions.endDrag).not.toHaveBeenCalled(); // tap path bypasses endDrag
+  });
+
+  it('tap on bottom-left corner triggers animated previous-curl', () => {
+    renderHook(() => usePageCurlGesture(makeParams()));
+    dispatchPointerEvent(stage, 'pointerdown', 30, 770);
+    dispatchPointerEvent(stage, 'pointerup', 32, 772); // 2.8 px movement, under 5 px threshold
+    expect(actions.startAnimatedCurl).toHaveBeenCalledWith('previous');
+    expect(actions.endDrag).not.toHaveBeenCalled();
+  });
+
+  it('drag (movement past TAP_MOVE_THRESHOLD_PX) calls endDrag, not the tap path', () => {
+    // Boundary check: ensure movement ≥ 5px reverts to the normal endDrag path.
+    renderHook(() => usePageCurlGesture(makeParams()));
+    dispatchPointerEvent(stage, 'pointerdown', 1150, 750);
+    dispatchPointerEvent(stage, 'pointerup', 1100, 700); // ~71 px movement, well past threshold
+    expect(actions.endDrag).toHaveBeenCalledTimes(1);
+    expect(actions.startAnimatedCurl).not.toHaveBeenCalled();
+  });
+
   it('TOP-right corner pointerdown does NOT trigger curl (cornerToDirection returns null for top corners)', () => {
     renderHook(() => usePageCurlGesture(makeParams()));
     dispatchPointerEvent(stage, 'pointerdown', 1180, 20); // top-right area
@@ -173,7 +204,10 @@ describe('usePageCurlGesture — corner hit-test + setPointerCapture', () => {
     renderHook(() => usePageCurlGesture(makeParams()));
 
     dispatchPointerEvent(stage, 'pointerdown', 1150, 750);
-    dispatchPointerEvent(stage, 'pointerup', 1150, 750); // normal pointerup on stage
+    // Pointerup at a DIFFERENT position so tap detection (TAP_MOVE_THRESHOLD_PX
+    // = 5) is not triggered — this test exercises the drag-and-release endDrag
+    // path. Distance from (1150, 750) → (1050, 700) is ~112 px, well past tap.
+    dispatchPointerEvent(stage, 'pointerup', 1050, 700);
 
     expect(actions.endDrag).toHaveBeenCalledTimes(1); // normal path
 

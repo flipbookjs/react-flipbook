@@ -12,6 +12,16 @@ import { curlAssert } from './types';
 const CORNER_ZONE_RADIUS = 80; // px — preserved from old fork usePageCurlGesture.ts:13
 const WHEEL_COOLDOWN_MS = 150; // preserved from old fork
 
+// Tap-to-curl behavior. When the pointer moves less than this distance between
+// pointerdown and pointerup, the gesture is treated as a tap (click) on the
+// corner instead of a zero-distance drag. A zero-distance drag would have
+// progress < commitThreshold and spring back to flat — i.e. click-on-corner
+// would do nothing. Tap detection routes those interactions through
+// startAnimatedCurl instead, matching user expectation that "click the corner
+// to flip the page". The architectural plan's Checklist item 13 names this
+// behavior; neither the old fork nor 3A/3B implemented it. Added 3C Phase 4.5.
+const TAP_MOVE_THRESHOLD_PX = 5;
+
 /** Parameters useCurlMode passes to usePageCurlGesture. */
 export interface UsePageCurlGestureParams {
   /** Mirrors the animation hook's enabled flag. False → no listeners attached. */
@@ -122,6 +132,10 @@ export const usePageCurlGesture = (params: UsePageCurlGestureParams): void => {
   // read by handlePointerMove/handlePointerUp to drive toPageLocal transform.
   // Mirrors old fork's directionRef pattern.
   const directionRef = useRef<'next' | 'previous' | null>(null);
+
+  // Tap detection: pointerdown coords stored for the no-movement check in
+  // pointerup. Cleared in pointerup, pointercancel, and unmount cleanup.
+  const pointerDownPosRef = useRef<{ x: number; y: number } | null>(null);
 
   // Wheel cooldown timestamp. Preserved from old fork.
   // Initialized to -Infinity so the FIRST wheel event is never swallowed by the cooldown.
@@ -265,6 +279,9 @@ export const usePageCurlGesture = (params: UsePageCurlGestureParams): void => {
     // Lock direction so move/up/cancel apply the correct transform.
     directionRef.current = direction;
 
+    // Record pointerdown position for tap detection in pointerup.
+    pointerDownPosRef.current = { x: event.clientX, y: event.clientY };
+
     // Start the drag — useCurlAnimation captures its snapshot internally.
     actions.startDrag(direction);
 
@@ -343,11 +360,36 @@ export const usePageCurlGesture = (params: UsePageCurlGestureParams): void => {
     if (activePointerIdRef.current !== event.pointerId) return;
     if (directionRef.current === null) {
       activePointerIdRef.current = null;
+      pointerDownPosRef.current = null;
       releaseOverlayCapture(event.pointerId);
       clearWindowPointerUpFallback();
       return;
     }
     const { actions, pageWidth, useDualCoordinates } = liveParamsRef.current;
+
+    // Tap detection: if the pointer moved less than TAP_MOVE_THRESHOLD_PX
+    // between pointerdown and pointerup, treat as a click on the corner.
+    // The zero-distance drag in progress has progress ≈ 0 (below
+    // commitThreshold), so the normal endDrag path would spring back to flat.
+    // Instead: cancel the drag cleanly, then trigger an animated curl.
+    const downPos = pointerDownPosRef.current;
+    pointerDownPosRef.current = null;
+    if (downPos !== null) {
+      const dx = event.clientX - downPos.x;
+      const dy = event.clientY - downPos.y;
+      if (Math.hypot(dx, dy) < TAP_MOVE_THRESHOLD_PX) {
+        const tapDirection = directionRef.current;
+        activePointerIdRef.current = null;
+        directionRef.current = null;
+        releaseOverlayCapture(event.pointerId);
+        clearWindowPointerUpFallback();
+        // cancel() returns the state machine to idle without dispatching;
+        // startAnimatedCurl then begins a full animated curl from idle.
+        actions.cancel();
+        actions.startAnimatedCurl(tapDirection);
+        return;
+      }
+    }
 
     // Send final updateDrag with the pointerup coords BEFORE endDrag, so endDrag's
     // threshold check sees fresh curlResultRef.progress. Old fork relied on a
@@ -369,6 +411,7 @@ export const usePageCurlGesture = (params: UsePageCurlGestureParams): void => {
     if (activePointerIdRef.current !== event.pointerId) return;
     activePointerIdRef.current = null;
     directionRef.current = null;
+    pointerDownPosRef.current = null;
     releaseOverlayCapture(event.pointerId);
     clearWindowPointerUpFallback();
     liveParamsRef.current.actions.cancel(); // no endDrag — cancellation aborts, never commits

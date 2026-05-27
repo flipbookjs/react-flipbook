@@ -7,6 +7,7 @@ function App() {
       <Flipbook
         url="/LDEO%20Annual%20Report%202021%20-%20Print%20Version.pdf"
         viewMode="auto"
+        enablePageCurl
       />
     </div>
   );
