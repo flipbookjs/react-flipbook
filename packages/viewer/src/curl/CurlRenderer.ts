@@ -188,6 +188,24 @@ export const renderCurlFrame = (input: CurlRenderInput): void => {
         ctx.restore();
     }
 
+    // 6. Corner edge line — thin stroke around the curled-paper polygon. Provides
+    // visual definition on solid-color pages (e.g. mostly-white) where the shadows
+    // alone don't distinguish the curl from the page underneath. Drawn LAST so
+    // it sits on top of everything else.
+    if (showShadows && flippingClip.length > 0) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.18)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(flippingClip[0].x, flippingClip[0].y);
+        for (let i = 1; i < flippingClip.length; i++) {
+            ctx.lineTo(flippingClip[i].x, flippingClip[i].y);
+        }
+        ctx.closePath();
+        ctx.stroke();
+        ctx.restore();
+    }
+
 };
 
 const clipToPolygon = (ctx: CanvasRenderingContext2D, points: Point[]): void => {
@@ -203,8 +221,55 @@ const clipToPolygon = (ctx: CanvasRenderingContext2D, points: Point[]): void => 
 
 // ---- Shadow rendering (ported from CanvasRender.ts) ----
 
+/**
+ * Inner + outer shadow opacity ramps up from 0 to full across this initial slice
+ * of `curl.shadow.progress`, giving the curl an elegant soft entry instead of
+ * appearing at full strength the moment the corner starts lifting. Real paper
+ * just starting to fold casts almost no shadow — this curve matches that.
+ */
+const SHADOW_RAMP_IN_END = 0.2;
+
 /** Shadows fade to zero by this progress value, preventing flash on canvas clear. */
 const SHADOW_FADE_END = 0.85;
+
+/**
+ * Triangular opacity envelope: 0 → 1 over [0, SHADOW_RAMP_IN_END], stays at 1,
+ * then 1 → 0 over [SHADOW_RAMP_IN_END, SHADOW_FADE_END]. Returns 0 outside [0, 1].
+ */
+const shadowProgressEnvelope = (progress: number): number => {
+    const rampIn = Math.min(1, Math.max(0, progress / SHADOW_RAMP_IN_END));
+    const fadeOut = Math.max(0, 1 - progress / SHADOW_FADE_END);
+    return rampIn * fadeOut;
+};
+
+/**
+ * As the curl corner crosses the page's vertical midpoint, the cast/inner shadow
+ * direction flips. A hard switch at exactly midpoint looks jarring, so this helper
+ * returns blend factors for the two directions over a transition zone around the
+ * midpoint. Outside the zone only one direction is visible; inside, both are drawn
+ * with complementary opacities (sum = 1) so the visual ink is roughly conserved.
+ *
+ * Position-driven (uses flippingPosition.x), not time-driven — the fade follows the
+ * actual curl progress regardless of animation speed.
+ *
+ * Returns: { forward, backward } each in [0, 1]; forward + backward = 1 inside the
+ * zone, with one being 0 outside it.
+ */
+const TRANSITION_ZONE_HALF_WIDTH = 0.1;  // ±10% of pageWidth around midpoint = 20% total span
+const shadowDirectionBlend = (
+    flippingX: number,
+    pageWidth: number,
+): { forward: number; backward: number } => {
+    const midpoint = pageWidth / 2;
+    const halfSpan = pageWidth * TRANSITION_ZONE_HALF_WIDTH;
+    const transitionStart = midpoint - halfSpan;
+    const transitionEnd = midpoint + halfSpan;
+    if (flippingX <= transitionStart) return { forward: 1, backward: 0 };
+    if (flippingX >= transitionEnd) return { forward: 0, backward: 1 };
+    // Linear interpolation: at transitionStart → forward=1, at transitionEnd → forward=0
+    const forward = (transitionEnd - flippingX) / (transitionEnd - transitionStart);
+    return { forward, backward: 1 - forward };
+};
 
 export const drawSpineShadow = (
     ctx: CanvasRenderingContext2D,
@@ -241,11 +306,19 @@ const drawOuterShadow = (
     pageHeight: number,
     mirrorX: boolean,
 ): void => {
-    // Shadow width scales with progress. Opacity fades to zero by SHADOW_FADE_END,
-    // so no shadow is visible when the canvas clears at animation completion.
+    // Shadow width scales with progress. Opacity follows the envelope: ramps from
+    // 0 at curl start (soft entry — real paper barely lifted casts no shadow),
+    // reaches full strength after SHADOW_RAMP_IN_END, then fades to 0 by
+    // SHADOW_FADE_END (so the canvas clears with no shadow flash).
     const shadowWidth = (pageWidth * 3 / 4) * curl.shadow.progress;
-    const opacity = Math.max(0, 1 - curl.shadow.progress / SHADOW_FADE_END) * 0.3;
-    if (shadowWidth <= 0 || opacity <= 0) return;
+    const baseOpacity = shadowProgressEnvelope(curl.shadow.progress) * 0.3;
+    if (shadowWidth <= 0 || baseOpacity <= 0) return;
+
+    // Blend the two direction shadows across the midpoint transition zone — avoids
+    // a hard switch when the curl corner crosses the page's vertical midline.
+    const { forward, backward } = shadowDirectionBlend(curl.flippingPosition.x, pageWidth);
+    const forwardOpacity = baseOpacity * forward;
+    const backwardOpacity = baseOpacity * backward;
 
     ctx.save();
     ctx.beginPath();
@@ -257,22 +330,29 @@ const drawOuterShadow = (
     const shadowRotation = Math.PI + curl.shadow.angle + Math.PI / 2;
     ctx.rotate(mirrorX ? -shadowRotation : shadowRotation);
 
-    const gradient = ctx.createLinearGradient(0, 0, shadowWidth, 0);
-
-    if (curl.flippingPosition.x < pageWidth / 2) {
-        // Forward direction shadow
+    // Forward direction (dark → transparent, drawn at origin). Dominant past midpoint.
+    if (forwardOpacity > 0) {
+        ctx.save();
         ctx.translate(0, -100);
-        gradient.addColorStop(0, `rgba(0, 0, 0, ${opacity})`);
-        gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
-    } else {
-        // Backward direction shadow
-        ctx.translate(-shadowWidth, -100);
-        gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
-        gradient.addColorStop(1, `rgba(0, 0, 0, ${opacity})`);
+        const fg = ctx.createLinearGradient(0, 0, shadowWidth, 0);
+        fg.addColorStop(0, `rgba(0, 0, 0, ${forwardOpacity})`);
+        fg.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = fg;
+        ctx.fillRect(0, 0, shadowWidth, pageHeight * 2);
+        ctx.restore();
     }
 
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, shadowWidth, pageHeight * 2);
+    // Backward direction (transparent → dark, drawn at -shadowWidth). Dominant pre-midpoint.
+    if (backwardOpacity > 0) {
+        ctx.save();
+        ctx.translate(-shadowWidth, -100);
+        const bg = ctx.createLinearGradient(0, 0, shadowWidth, 0);
+        bg.addColorStop(0, 'rgba(0, 0, 0, 0)');
+        bg.addColorStop(1, `rgba(0, 0, 0, ${backwardOpacity})`);
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, shadowWidth, pageHeight * 2);
+        ctx.restore();
+    }
 
     ctx.restore();
 };
@@ -284,11 +364,16 @@ const drawInnerShadow = (
     pageHeight: number,
     mirrorX: boolean,
 ): void => {
-    // Shadow width scales with progress. Opacity fades to zero by SHADOW_FADE_END,
-    // so no shadow is visible when the canvas clears at animation completion.
+    // Same envelope as drawOuterShadow — both shadows ramp up together at curl start.
     const shadowWidth = (pageWidth * 3 / 4) * curl.shadow.progress;
-    const opacity = Math.max(0, 1 - curl.shadow.progress / SHADOW_FADE_END) * 0.3;
-    if (shadowWidth <= 0 || opacity <= 0) return;
+    const baseOpacity = shadowProgressEnvelope(curl.shadow.progress) * 0.3;
+    if (shadowWidth <= 0 || baseOpacity <= 0) return;
+
+    // Blend the two direction shadows across the midpoint transition zone (same
+    // helper as drawOuterShadow so both shadows fade together as the curl crosses).
+    const { forward, backward } = shadowDirectionBlend(curl.flippingPosition.x, pageWidth);
+    const forwardOpacity = baseOpacity * forward;
+    const backwardOpacity = baseOpacity * backward;
 
     const isw = (shadowWidth * 3) / 4;
 
@@ -310,26 +395,37 @@ const drawInnerShadow = (
     const shadowRotation = Math.PI + curl.shadow.angle + Math.PI / 2;
     ctx.rotate(mirrorX ? -shadowRotation : shadowRotation);
 
-    const gradient = ctx.createLinearGradient(0, 0, isw, 0);
+    // The inner shadow uses a 4-stop gradient (dark-light-dark-transparent) to create
+    // a "two-band" crease stripe. The 0.05 light-gap stop is also scaled by the fade
+    // factor so when a direction is fully faded out, none of its stops bleed through.
 
-    if (curl.flippingPosition.x < pageWidth / 2) {
-        // Forward
+    // Forward direction (drawn at -isw). Dominant past midpoint.
+    if (forwardOpacity > 0) {
+        ctx.save();
         ctx.translate(-isw, -100);
-        gradient.addColorStop(1, `rgba(0, 0, 0, ${opacity})`);
-        gradient.addColorStop(0.9, 'rgba(0, 0, 0, 0.05)');
-        gradient.addColorStop(0.7, `rgba(0, 0, 0, ${opacity})`);
-        gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
-    } else {
-        // Backward
-        ctx.translate(0, -100);
-        gradient.addColorStop(0, `rgba(0, 0, 0, ${opacity})`);
-        gradient.addColorStop(0.1, 'rgba(0, 0, 0, 0.05)');
-        gradient.addColorStop(0.3, `rgba(0, 0, 0, ${opacity})`);
-        gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        const fg = ctx.createLinearGradient(0, 0, isw, 0);
+        fg.addColorStop(1, `rgba(0, 0, 0, ${forwardOpacity})`);
+        fg.addColorStop(0.9, `rgba(0, 0, 0, ${0.05 * forward})`);
+        fg.addColorStop(0.7, `rgba(0, 0, 0, ${forwardOpacity})`);
+        fg.addColorStop(0, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = fg;
+        ctx.fillRect(0, 0, isw, pageHeight * 2);
+        ctx.restore();
     }
 
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, isw, pageHeight * 2);
+    // Backward direction (drawn at origin). Dominant pre-midpoint.
+    if (backwardOpacity > 0) {
+        ctx.save();
+        ctx.translate(0, -100);
+        const bg = ctx.createLinearGradient(0, 0, isw, 0);
+        bg.addColorStop(0, `rgba(0, 0, 0, ${backwardOpacity})`);
+        bg.addColorStop(0.1, `rgba(0, 0, 0, ${0.05 * backward})`);
+        bg.addColorStop(0.3, `rgba(0, 0, 0, ${backwardOpacity})`);
+        bg.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, isw, pageHeight * 2);
+        ctx.restore();
+    }
 
     ctx.restore();
 };

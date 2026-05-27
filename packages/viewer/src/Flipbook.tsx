@@ -12,6 +12,9 @@ export interface FlipbookProps {
   initialPage?: number;
   renderError?: (error: Error) => ReactNode;
   renderLoading?: () => ReactNode;
+  /** Enable page-curl animation on pointer/wheel interactions. Defaults to false (opt-in).
+   *  Only active when resolvedViewMode === 'dual-cover'. Curl engine lazy-loaded. */
+  enablePageCurl?: boolean;
 }
 
 export function Flipbook({
@@ -21,6 +24,7 @@ export function Flipbook({
   initialPage = 0,
   renderError,
   renderLoading,
+  enablePageCurl = false,
 }: FlipbookProps) {
   const internalSource = useMemo(
     () => (url ? new PdfjsSource(url) : null),
@@ -45,6 +49,7 @@ export function Flipbook({
       initialPage={initialPage}
       renderError={renderError}
       renderLoading={renderLoading}
+      enablePageCurl={enablePageCurl}
     />
   );
 }

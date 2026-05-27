@@ -106,3 +106,26 @@
   white-space: nowrap;
   border: 0;
 }
+
+/* --- Page curl overlay (Step 3B) --- */
+
+.fbjs-stage {
+  /* pan-y allows a scrollable parent to still scroll vertically while reserving
+     horizontal gestures for curl. Prevents browser pull-to-refresh and horizontal
+     back-swipe from interfering with corner drags. */
+  touch-action: pan-y;
+}
+
+.fbjs-curl-overlay {
+  /* z-index 2 puts the overlay above .fbjs-spread (default z-index), with room
+     for a future toolbar at higher z-index. */
+  z-index: 2;
+  /* Default: events pass through to spreads underneath. */
+  pointer-events: none;
+}
+
+.fbjs-curl-overlay[data-active='true'] {
+  pointer-events: auto;
+  /* During an in-flight curl, claim all touch behavior — no native scroll/pinch/select. */
+  touch-action: none;
+}
