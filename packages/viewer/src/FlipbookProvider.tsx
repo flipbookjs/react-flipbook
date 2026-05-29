@@ -4,10 +4,12 @@ import {
   useLayoutEffect,
   useRef,
   useMemo,
+  useCallback,
   lazy,
   Suspense,
   type ReactNode,
 } from 'react';
+import { useWheelRouter } from './zoom/useWheelRouter';
 import type { PageSource } from './types/PageSource';
 import { usePageSource } from './hooks/usePageSource';
 import { flipbookReducer, createInitialState } from './core/flipbookReducer';
@@ -25,6 +27,7 @@ import {
 } from './core/PageRegistry';
 import { CurlChunkErrorBoundary } from './curl/CurlChunkErrorBoundary';
 import { deriveEffectiveScaleAndOverflow } from './zoom/derivation';
+import type { DefaultScale } from './zoom/types';
 
 /**
  * Curl engine is delivered as a separate chunk loaded only when `enablePageCurl === true`.
@@ -43,6 +46,9 @@ interface FlipbookProviderProps {
    *  Curl engine is lazy-loaded as a separate chunk only when this is true. Only active
    *  when `resolvedViewMode === 'dual-cover'`. */
   enablePageCurl?: boolean;
+  /** Initial zoom mode or scale. Wired to 5A's `createInitialState(viewMode, defaultScale)`
+   *  factory parameter. Defaults to `'fit-page'`. */
+  defaultScale?: DefaultScale;
 }
 
 export function FlipbookProvider({
@@ -52,13 +58,33 @@ export function FlipbookProvider({
   renderError,
   renderLoading,
   enablePageCurl = false,
+  defaultScale = 'fit-page',
 }: FlipbookProviderProps) {
   // 1. Reducer
+  // useReducer's lazy init takes a single argument; bundle viewMode + defaultScale
+  // through a closure rather than threading both through the initializer signature.
   const [state, dispatch] = useReducer(
     flipbookReducer,
-    viewMode,
-    (vm) => createInitialState(vm ?? 'auto'),
+    undefined,
+    () => createInitialState(viewMode ?? 'auto', defaultScale),
   );
+
+  // Dev-mode warning when defaultScale changes after mount. The prop is
+  // uncontrolled by design (initial-state factory only; consumer must remount
+  // with fresh React `key` to change). Consumers migrating from controlled-
+  // pattern viewers may not realize this; the warning surfaces the gotcha at
+  // dev time. Production: silent (NODE_ENV !== 'production' gate).
+  const initialDefaultScaleRef = useRef(defaultScale);
+  useEffect(() => {
+    if (process.env.NODE_ENV !== 'production' && defaultScale !== initialDefaultScaleRef.current) {
+      console.warn(
+        '[flipbook] defaultScale changed from '
+        + `${JSON.stringify(initialDefaultScaleRef.current)} to ${JSON.stringify(defaultScale)} `
+        + 'after mount — uncontrolled prop, ignored. To switch scale at runtime, dispatch '
+        + 'via toolbar (Step 6+) or remount with a fresh React `key`.',
+      );
+    }
+  }, [defaultScale]);
 
   // 2. Source lifecycle
   const sourceState = usePageSource(source);
@@ -197,18 +223,90 @@ export function FlipbookProvider({
     source,
   ]);
 
+  // 6a. Wheel-handler refs (live-params pattern). All values the wheel router
+  // needs change at React-render frequency; the listener attaches once and
+  // reads fresh values each event via these refs. Same approach as
+  // usePageCurlGesture's liveParamsRef (curl/usePageCurlGesture.ts:123-124).
+  const effectiveScaleRef = useRef(effectiveScale);
+  effectiveScaleRef.current = effectiveScale;
+  const isOverflowingRef = useRef(isOverflowing);
+  isOverflowingRef.current = isOverflowing;
+  // Loading-state ref: the wheel router reads isReady to suppress Ctrl+wheel
+  // during the pre-isReady window (otherwise the loading-default effectiveScale=1
+  // would silently transition zoomMode → 'custom'). Handled inside routeWheelEvent.
+  const isReadyRef = useRef(isReady);
+  isReadyRef.current = isReady;
+
+  // Curl handler registration — ref-backed setter, no re-render on register/unregister.
+  const curlWheelHandlerRef = useRef<((d: 'next' | 'previous') => void) | null>(null);
+  const registerCurlWheelHandler = useCallback(
+    (handler: ((d: 'next' | 'previous') => void) | null) => {
+      curlWheelHandlerRef.current = handler;
+    },
+    [],
+  );
+
+  // Leading-edge zoom throttle state — see useWheelRouter for the throttle logic.
+  // Initialized to -Infinity so the FIRST wheel event is never swallowed by the
+  // throttle window. With `0` as the initial value, a user's first Ctrl+wheel
+  // within the first 150ms after mount would see `now - 0 < 150 → drop`.
+  // -Infinity ensures `now - (-Infinity) === Infinity`, which is always
+  // >= throttleMs → first event fires. Matches the old fork's lastWheelRef
+  // pattern at usePageCurlGesture.ts:145 (preserved in `decideCurlWheelDispatch`'s
+  // CurlWheelDecisionInputs.lastWheelTimestamp default).
+  const lastZoomTimestampRef = useRef<number>(-Infinity);
+
+  // 6b. Wheel listener attachment + side-effect orchestration. The pure routing
+  // logic lives in `routeWheelEvent` (zoom/wheelRouter.ts) — table-driven
+  // unit-testable. The `useWheelRouter` hook attaches the listener to
+  // containerRef and maps the returned WheelRoute to side effects (preventDefault
+  // on the event, dispatch SET_ZOOM, invoke curl callback).
+  //
+  // ATTACHMENT TARGET: containerRef, NOT stageRef. `.fbjs-container` is
+  // unconditional (renders inside <FlipbookContext.Provider> opened at line 214 below; the .fbjs-container div is line 217);
+  // `.fbjs-stage` only renders when showContent === true. An empty-deps effect
+  // keyed on stageRef.current would see null on initial render and never
+  // re-attach. Container is unconditional → listener fires once on mount with
+  // non-null ref and stays attached. Wheel events from the inner stage bubble
+  // up to container.
+  useWheelRouter({
+    containerRef,
+    isReadyRef,
+    isOverflowingRef,
+    effectiveScaleRef,
+    curlWheelHandlerRef,
+    lastZoomTimestampRef,
+    dispatch,
+  });
+
   // 7. Ready gate
   const showContent = isReady && state.containerWidth > 0 && state.containerHeight > 0;
 
   // 8. Render
   const contextValue = useMemo(
-    () => ({ state, dispatch, source, spreads, effectiveScale, isOverflowing }),
-    [state, dispatch, source, spreads, effectiveScale, isOverflowing],
+    () => ({ state, dispatch, source, spreads, effectiveScale, isOverflowing, registerCurlWheelHandler }),
+    [state, dispatch, source, spreads, effectiveScale, isOverflowing, registerCurlWheelHandler],
   );
 
+  // Decision 10: curl needs the full spread visible. When isOverflowing flips true
+  // (zoom past fit-page), the overlay unmounts; useCurlMode cleanup runs; curl
+  // module's wheel-handler registration unregisters via the cleanup path. When
+  // isOverflowing flips back false (resize-larger or zoom-out), the overlay
+  // remounts and re-registers.
+  //
+  // Cancellation is belt-and-suspenders:
+  //   (1) overlay unmount path — useCurlMode's `enabled` effect (3B Decision 18)
+  //       fires on enabled true→false and bumps cancelSignal + cancels animation.
+  //   (2) effectiveScale-change path — useCurlMode's cancellation effect bumps
+  //       cancelSignal on any effectiveScale transition (even when isOverflowing
+  //       does NOT trip — e.g., zoom from 1.0→1.1 with spread still fitting).
+  //       Cancels in-flight curl that would otherwise read stale pageWidth/
+  //       pageHeight derived from the new effectiveScale.
+  // Both paths increment the same counter; redundant but harmless.
   const showCurlOverlay = showContent
     && enablePageCurl
-    && state.resolvedViewMode === 'dual-cover';
+    && state.resolvedViewMode === 'dual-cover'
+    && !isOverflowing;
 
   return (
     <FlipbookContext.Provider value={contextValue}>
@@ -233,7 +331,12 @@ export function FlipbookProvider({
               renderLoading?.() ?? <LoadingState />
             )}
             {showContent && (
-              <div ref={stageRef} data-testid="fbjs-ready" className="fbjs-stage">
+              <div
+                ref={stageRef}
+                data-testid="fbjs-ready"
+                className="fbjs-stage"
+                data-overflowing={isOverflowing ? 'true' : undefined}
+              >
                 <ErrorBoundary>
                   <SpreadRenderer />
                   <AriaAnnouncer />

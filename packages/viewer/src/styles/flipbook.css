@@ -5,6 +5,11 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  /* Decision 9: native scroll when scaled content exceeds container.
+     Pairs with .fbjs-stage min-content + margin:auto below — together
+     they form the canonical flex+overflow fix (browser-supported across
+     Chrome/Firefox/Edge 90+, Safari 15.4+). */
+  overflow: auto;
 }
 
 .fbjs-page {
@@ -71,6 +76,13 @@
    the stage, not relative to the outer container). */
 .fbjs-stage {
   position: relative;
+  /* Decision 9: opt out of flex's implicit min-sizing so the stage can be
+     larger than the container (enabling scroll-from-origin). margin: auto
+     centers when content fits AND lets scroll-bars reach (0,0) when it
+     doesn't — solves the flex-centered-clips-overflow bug. */
+  min-width: min-content;
+  min-height: min-content;
+  margin: auto;
 }
 
 .fbjs-spread {
@@ -114,6 +126,16 @@
      horizontal gestures for curl. Prevents browser pull-to-refresh and horizontal
      back-swipe from interfering with corner drags. */
   touch-action: pan-y;
+}
+
+/* Decision 12: when scaled content overflows the container, curl is disabled
+   (Decision 10) and mobile users need both axes to reach clipped content.
+   FlipbookProvider sets data-overflowing='true' on the stage div when
+   isOverflowing is true; this selector switches touch-action to allow pan-x
+   AND pan-y. Pinch-to-zoom remains deliberately omitted (separate touch-action
+   value — pinch-zoom — not enabled here; v0.2 territory). */
+.fbjs-stage[data-overflowing='true'] {
+  touch-action: pan-x pan-y;
 }
 
 .fbjs-curl-overlay {

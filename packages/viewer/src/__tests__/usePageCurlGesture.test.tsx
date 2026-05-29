@@ -231,58 +231,6 @@ describe('usePageCurlGesture — corner hit-test + setPointerCapture', () => {
   });
 });
 
-describe('usePageCurlGesture — wheel handling (per SD2)', () => {
-  it('wheel with positive deltaY triggers next curl', () => {
-    renderHook(() => usePageCurlGesture(makeParams()));
-    stage.dispatchEvent(new WheelEvent('wheel', { deltaY: 50, deltaX: 0, bubbles: true }));
-    expect(actions.startAnimatedCurl).toHaveBeenCalledWith('next');
-  });
-
-  it('wheel with negative deltaY triggers previous curl', () => {
-    renderHook(() => usePageCurlGesture(makeParams()));
-    stage.dispatchEvent(new WheelEvent('wheel', { deltaY: -50, deltaX: 0, bubbles: true }));
-    expect(actions.startAnimatedCurl).toHaveBeenCalledWith('previous');
-  });
-
-  it('wheel uses max-magnitude axis (deltaX > deltaY → uses deltaX)', () => {
-    renderHook(() => usePageCurlGesture(makeParams()));
-    // Larger |deltaX| (trackpad horizontal swipe)
-    stage.dispatchEvent(new WheelEvent('wheel', { deltaY: 10, deltaX: 80, bubbles: true }));
-    expect(actions.startAnimatedCurl).toHaveBeenCalledWith('next');
-  });
-
-  it('wheel cooldown (150ms) prevents rapid re-trigger', () => {
-    vi.useFakeTimers();
-    renderHook(() => usePageCurlGesture(makeParams()));
-
-    stage.dispatchEvent(new WheelEvent('wheel', { deltaY: 50, bubbles: true }));
-    expect(actions.startAnimatedCurl).toHaveBeenCalledTimes(1);
-
-    // 50ms later (within cooldown)
-    vi.advanceTimersByTime(50);
-    stage.dispatchEvent(new WheelEvent('wheel', { deltaY: 50, bubbles: true }));
-    expect(actions.startAnimatedCurl).toHaveBeenCalledTimes(1); // still 1 — ignored
-
-    // 200ms later (past cooldown)
-    vi.advanceTimersByTime(200);
-    stage.dispatchEvent(new WheelEvent('wheel', { deltaY: 50, bubbles: true }));
-    expect(actions.startAnimatedCurl).toHaveBeenCalledTimes(2);
-
-    vi.useRealTimers();
-  });
-
-  it('wheel always calls preventDefault — even during busy/cooldown', () => {
-    // Old fork prevented default unconditionally at the top of handleWheel.
-    // Prevents the page from scrolling underneath during animations.
-    (actions.isAnimating as ReturnType<typeof vi.fn>).mockReturnValue(true);
-    renderHook(() => usePageCurlGesture(makeParams()));
-    const wheel = new WheelEvent('wheel', { deltaY: 50, bubbles: true, cancelable: true });
-    stage.dispatchEvent(wheel);
-    expect(wheel.defaultPrevented).toBe(true);
-    expect(actions.startAnimatedCurl).not.toHaveBeenCalled(); // busy gate held
-  });
-});
-
 describe('usePageCurlGesture — pointerdown side effects', () => {
   it('preventDefault + stopPropagation fire on a curl-eligible pointerdown', () => {
     renderHook(() => usePageCurlGesture(makeParams()));

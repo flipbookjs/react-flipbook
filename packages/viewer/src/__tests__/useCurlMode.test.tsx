@@ -34,7 +34,7 @@ function buildContext(opts: { pageCount?: number; currentSpreadIndex?: number; r
   };
   const spreads = computeSpreads(pageCount, resolvedViewMode);
   state.spreadCount = spreads.length;
-  return { state, dispatch: vi.fn(), source, spreads, effectiveScale: 1, isOverflowing: false };
+  return { state, dispatch: vi.fn(), source, spreads, effectiveScale: 1, isOverflowing: false, registerCurlWheelHandler: vi.fn() };
 }
 
 function Wrapper({ ctxValue, registry, children }: { ctxValue: FlipbookContextValue; registry: PageRegistryRead; children: ReactNode }) {
@@ -204,5 +204,164 @@ describe('useCurlMode — orchestrator', () => {
     });
 
     expect(result.current.getCancelSignal()).toBeGreaterThan(before);
+  });
+});
+
+describe('useCurlMode — wheel handler registration', () => {
+  beforeEach(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('registers a curl wheel handler on mount when enabled=true', () => {
+    const ctxValue = buildContext({});
+    const { read } = createPageRegistry();
+    renderHook(
+      () => useTestHarness({ enabled: true, ctxValue, registryRead: read, registryVersion: 0 }),
+      { wrapper: ({ children }) => <Wrapper ctxValue={ctxValue} registry={read}>{children}</Wrapper> },
+    );
+    expect(ctxValue.registerCurlWheelHandler).toHaveBeenCalledTimes(1);
+    expect(ctxValue.registerCurlWheelHandler).toHaveBeenCalledWith(expect.any(Function));
+  });
+
+  it('unregisters on cleanup (passes null)', () => {
+    const ctxValue = buildContext({});
+    const { read } = createPageRegistry();
+    const { unmount } = renderHook(
+      () => useTestHarness({ enabled: true, ctxValue, registryRead: read, registryVersion: 0 }),
+      { wrapper: ({ children }) => <Wrapper ctxValue={ctxValue} registry={read}>{children}</Wrapper> },
+    );
+    (ctxValue.registerCurlWheelHandler as ReturnType<typeof vi.fn>).mockClear();
+    unmount();
+    expect(ctxValue.registerCurlWheelHandler).toHaveBeenCalledWith(null);
+  });
+
+  it('does NOT register when enabled=false', () => {
+    const ctxValue = buildContext({});
+    const { read } = createPageRegistry();
+    renderHook(
+      () => useTestHarness({ enabled: false, ctxValue, registryRead: read, registryVersion: 0 }),
+      { wrapper: ({ children }) => <Wrapper ctxValue={ctxValue} registry={read}>{children}</Wrapper> },
+    );
+    expect(ctxValue.registerCurlWheelHandler).not.toHaveBeenCalled();
+  });
+
+  it('registered handler delegates to decideCurlWheelDispatch and fires startAnimatedCurl on fire:true', () => {
+    const ctxValue = buildContext({});
+    const registry = createPageRegistry();
+    // Pre-populate the registry with bitmap entries for all pages — satisfies
+    // the nextBitmapReady gate inside useCurlMode's wheel handler so decision.fire
+    // can be true.
+    for (let i = 0; i < 10; i++) {
+      registry.write.register(i, {
+        canvas: document.createElement('canvas'),
+        element: document.createElement('div'),
+      });
+    }
+    const { result } = renderHook(
+      () => useTestHarness({ enabled: true, ctxValue, registryRead: registry.read, registryVersion: 1 }),
+      { wrapper: ({ children }) => <Wrapper ctxValue={ctxValue} registry={registry.read}>{children}</Wrapper> },
+    );
+
+    const registerMock = ctxValue.registerCurlWheelHandler as ReturnType<typeof vi.fn>;
+    const captured = registerMock.mock.calls[0][0] as (d: 'next' | 'previous') => void;
+    expect(typeof captured).toBe('function');
+
+    const startSpy = vi.spyOn(result.current.actions, 'startAnimatedCurl').mockImplementation(() => {});
+
+    captured('next');
+    expect(startSpy).toHaveBeenCalledWith('next');
+  });
+
+  it('registered handler respects animating gate (delegated to decideCurlWheelDispatch)', () => {
+    const ctxValue = buildContext({});
+    const { read } = createPageRegistry();
+    const { result } = renderHook(
+      () => useTestHarness({ enabled: true, ctxValue, registryRead: read, registryVersion: 0 }),
+      { wrapper: ({ children }) => <Wrapper ctxValue={ctxValue} registry={read}>{children}</Wrapper> },
+    );
+    const registerMock = ctxValue.registerCurlWheelHandler as ReturnType<typeof vi.fn>;
+    const captured = registerMock.mock.calls[0][0] as (d: 'next' | 'previous') => void;
+
+    vi.spyOn(result.current.actions, 'isAnimating').mockReturnValue(true);
+    const startSpy = vi.spyOn(result.current.actions, 'startAnimatedCurl').mockImplementation(() => {});
+
+    captured('next');
+    expect(startSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('useCurlMode — cancellation on effectiveScale change', () => {
+  beforeEach(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('effectiveScale change while enabled bumps cancelSignal + calls actions.cancel', () => {
+    let ctxValue: FlipbookContextValue = { ...buildContext({}), effectiveScale: 1 };
+    const { read } = createPageRegistry();
+    const Wrap = ({ children }: { children: ReactNode }) => (
+      <Wrapper ctxValue={ctxValue} registry={read}>{children}</Wrapper>
+    );
+    const { result, rerender } = renderHook(
+      () => useTestHarness({ enabled: true, ctxValue, registryRead: read, registryVersion: 0 }),
+      { wrapper: Wrap },
+    );
+
+    const cancelSpy = vi.spyOn(result.current.actions, 'cancel');
+    const signalBefore = result.current.getCancelSignal();
+
+    ctxValue = { ...ctxValue, effectiveScale: 1.5 };
+    rerender();
+
+    expect(result.current.getCancelSignal()).toBeGreaterThan(signalBefore);
+    expect(cancelSpy).toHaveBeenCalled();
+  });
+
+  it('effectiveScale change while disabled still bumps (dep array does not gate on enabled)', () => {
+    let ctxValue: FlipbookContextValue = { ...buildContext({}), effectiveScale: 1 };
+    const { read } = createPageRegistry();
+    const Wrap = ({ children }: { children: ReactNode }) => (
+      <Wrapper ctxValue={ctxValue} registry={read}>{children}</Wrapper>
+    );
+    const { result, rerender } = renderHook(
+      () => useTestHarness({ enabled: false, ctxValue, registryRead: read, registryVersion: 0 }),
+      { wrapper: Wrap },
+    );
+
+    const cancelSpy = vi.spyOn(result.current.actions, 'cancel');
+    const signalBefore = result.current.getCancelSignal();
+
+    ctxValue = { ...ctxValue, effectiveScale: 2 };
+    rerender();
+
+    expect(result.current.getCancelSignal()).toBeGreaterThan(signalBefore);
+    expect(cancelSpy).toHaveBeenCalled();
+  });
+
+  it('no-change rerender does NOT bump (effectiveScale path stable when value unchanged)', () => {
+    let ctxValue: FlipbookContextValue = { ...buildContext({}), effectiveScale: 1 };
+    const { read } = createPageRegistry();
+    const Wrap = ({ children }: { children: ReactNode }) => (
+      <Wrapper ctxValue={ctxValue} registry={read}>{children}</Wrapper>
+    );
+    const { result, rerender } = renderHook(
+      () => useTestHarness({ enabled: true, ctxValue, registryRead: read, registryVersion: 0 }),
+      { wrapper: Wrap },
+    );
+
+    const signalAfterMount = result.current.getCancelSignal();
+    // Re-render with the SAME effectiveScale — proves the effectiveScale path
+    // itself doesn't fire when prev === current.
+    ctxValue = { ...ctxValue, effectiveScale: 1 };
+    rerender();
+
+    expect(result.current.getCancelSignal()).toBe(signalAfterMount);
   });
 });

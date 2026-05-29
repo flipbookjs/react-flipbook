@@ -13,6 +13,12 @@ export interface FlipbookContextValue {
    *  (Decision 10). Consumers use this to gate curl, switch touch-action
    *  on the stage, etc. Computed in FlipbookProvider's effectiveScale useMemo. */
   isOverflowing: boolean;
+  /** Curl module registers its plain-wheel callback via this setter. FlipbookProvider
+   *  owns the wheel listener (Decision 11); curl plugs in here. Passing null
+   *  unregisters. Ref-backed — no re-render on registration. */
+  registerCurlWheelHandler: (
+    handler: ((direction: 'next' | 'previous') => void) | null,
+  ) => void;
 }
 
 export const FlipbookContext = createContext<FlipbookContextValue | null>(null);

@@ -48,6 +48,7 @@ function makeCtxValue(stateOverride: Partial<FlipbookState> = {}, dispatch = vi.
     spreads: stubSpreads,
     effectiveScale: 1,
     isOverflowing: false,
+    registerCurlWheelHandler: vi.fn(),
   };
 }
 

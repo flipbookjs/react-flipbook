@@ -10,7 +10,6 @@ import { curlAssert } from './types';
 // of truth — RefObject must be imported here.
 
 const CORNER_ZONE_RADIUS = 80; // px — preserved from old fork usePageCurlGesture.ts:13
-const WHEEL_COOLDOWN_MS = 150; // preserved from old fork
 
 // Tap-to-curl behavior. When the pointer moves less than this distance between
 // pointerdown and pointerup, the gesture is treated as a tap (click) on the
@@ -136,13 +135,6 @@ export const usePageCurlGesture = (params: UsePageCurlGestureParams): void => {
   // Tap detection: pointerdown coords stored for the no-movement check in
   // pointerup. Cleared in pointerup, pointercancel, and unmount cleanup.
   const pointerDownPosRef = useRef<{ x: number; y: number } | null>(null);
-
-  // Wheel cooldown timestamp. Preserved from old fork.
-  // Initialized to -Infinity so the FIRST wheel event is never swallowed by the cooldown.
-  // (Using 0 would swallow the first event when performance.now() is < 150ms — happens in
-  // fake-timer tests that start at 0, and possible in real runtime if a wheel arrives
-  // within the first 150ms of page load.)
-  const lastWheelRef = useRef<number>(-Infinity);
 
   // Hover state. Preserved from old fork — used by handleHoverPointerMove.
   const isHoveringCornerRef = useRef<boolean>(false);
@@ -429,36 +421,6 @@ export const usePageCurlGesture = (params: UsePageCurlGestureParams): void => {
     }
   };
 
-  const handleWheel = (event: WheelEvent): void => {
-    // preventDefault FIRST (preserved from old fork usePageCurlGesture.ts:288).
-    // The stage owns wheel — rapid wheel events during animation / cooldown should
-    // NOT scroll the page underneath. The listener is registered with
-    // { passive: false } below to make preventDefault actually work.
-    event.preventDefault();
-
-    const { actions, hasNextSpread, hasPreviousSpread, nextBitmapReady, prevBitmapReady } = liveParamsRef.current;
-
-    // Busy / cooldown gates (preserved from old fork).
-    if (actions.isAnimating()) return;
-    const now = performance.now();
-    if (now - lastWheelRef.current < WHEEL_COOLDOWN_MS) return;
-
-    // Max-magnitude axis (preserved from old fork usePageCurlGesture.ts:295).
-    // Handles trackpad horizontal swipes that primarily produce deltaX.
-    const dominantDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
-    if (dominantDelta === 0) return;
-
-    const direction: 'next' | 'previous' = dominantDelta > 0 ? 'next' : 'previous';
-
-    // Decision 11 preconditions also apply to wheel.
-    if (direction === 'next' && (!hasNextSpread || !nextBitmapReady)) return;
-    if (direction === 'previous' && (!hasPreviousSpread || !prevBitmapReady)) return;
-
-    // Stamp the cooldown timer only when we actually fire a curl.
-    lastWheelRef.current = now;
-    actions.startAnimatedCurl(direction);   // CHANGED: drop the second commitFn arg
-  };
-
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage || !enabled) return;
@@ -468,7 +430,6 @@ export const usePageCurlGesture = (params: UsePageCurlGestureParams): void => {
     stage.addEventListener('pointerup', handlePointerUp);
     stage.addEventListener('pointercancel', handlePointerCancel);
     stage.addEventListener('pointerleave', handlePointerLeave);
-    stage.addEventListener('wheel', handleWheel, { passive: false });
     // Hover hint listener — preserved from old fork.
     stage.addEventListener('pointermove', handleHoverPointerMove);
 
@@ -478,7 +439,6 @@ export const usePageCurlGesture = (params: UsePageCurlGestureParams): void => {
       stage.removeEventListener('pointerup', handlePointerUp);
       stage.removeEventListener('pointercancel', handlePointerCancel);
       stage.removeEventListener('pointerleave', handlePointerLeave);
-      stage.removeEventListener('wheel', handleWheel);
       stage.removeEventListener('pointermove', handleHoverPointerMove);
 
       // Cleanup hover state if active — mirror handlePointerLeave logic.
