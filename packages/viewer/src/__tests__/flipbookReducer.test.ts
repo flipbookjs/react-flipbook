@@ -67,6 +67,8 @@ function makeState(overrides: Partial<FlipbookState> = {}): FlipbookState {
     resolvedViewMode: 'dual-cover',
     containerWidth: 1024,
     containerHeight: 768,
+    zoomMode: 'fit-page',
+    customScale: 1,
     ...overrides,
   };
 }

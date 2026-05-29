@@ -24,6 +24,7 @@ import {
   createPageRegistry,
 } from './core/PageRegistry';
 import { CurlChunkErrorBoundary } from './curl/CurlChunkErrorBoundary';
+import { deriveEffectiveScaleAndOverflow } from './zoom/derivation';
 
 /**
  * Curl engine is delivered as a separate chunk loaded only when `enablePageCurl === true`.
@@ -153,33 +154,56 @@ export function FlipbookProvider({
     [state.pageCount, state.resolvedViewMode],
   );
 
-  const effectiveScale = useMemo(() => {
-    // Guard: source.getPageSize() is only safe after init. During source
-    // transitions, `source` has changed but usePageSource hasn't caught up
-    // yet — isReady is false while the new source is uninitialized.
-    // Without this guard, source.getPageSize(0) returns undefined → crash.
-    if (!isReady || state.pageCount === 0) return 1;
+  const { effectiveScale, isOverflowing } = useMemo(() => {
+    // Loading/transient-state guard — extended from Step 2's original
+    // `!isReady || pageCount === 0` check to also cover `containerWidth === 0`
+    // and `containerHeight === 0` (M1 fix from template-5/6 review). Without
+    // the container-dim check, the brief transient between `isReady=true` and
+    // ResizeObserver firing produces `containerWidth=0` AND `pageCount>0`,
+    // which the prior guard let through. With MIN_AVAILABLE=1 floor, the
+    // derivation then computed scaledWidth=1 > containerWidth=0 → false
+    // positive `isOverflowing=true`. Consumers gating on isOverflowing would
+    // briefly disable curl / relax touch-action for no real reason.
+    //
+    // Loading-phase defaults: effectiveScale=1, isOverflowing=false. Safe
+    // defaults for both consumers (don't disable curl, don't switch
+    // touch-action — there's no content to react to yet).
+    if (!isReady || state.pageCount === 0 || state.containerWidth === 0 || state.containerHeight === 0) {
+      return { effectiveScale: 1, isOverflowing: false };
+    }
     const pageSize = source.getPageSize(0);
-    const spreadWidth = state.resolvedViewMode === 'dual-cover'
-      ? pageSize.width * 2
-      : pageSize.width;
-    const spreadHeight = pageSize.height;
-    const CONTAINER_PADDING = 16;
-    const MIN_AVAILABLE = 1;
-    const availableWidth = Math.max(MIN_AVAILABLE, state.containerWidth - CONTAINER_PADDING * 2);
-    const availableHeight = Math.max(MIN_AVAILABLE, state.containerHeight - CONTAINER_PADDING * 2);
-    const scaleX = availableWidth / spreadWidth;
-    const scaleY = availableHeight / spreadHeight;
-    return Math.min(scaleX, scaleY);
-  }, [isReady, state.pageCount, state.resolvedViewMode, state.containerWidth, state.containerHeight, source]);
+
+    // M2 fix (template-1 review): math extracted to a pure function
+    // `deriveEffectiveScaleAndOverflow` in src/zoom/derivation.ts — unit-tested
+    // directly. Provider's useMemo only handles the loading guard + input
+    // marshalling; the formula itself lives in the testable pure function.
+    return deriveEffectiveScaleAndOverflow({
+      zoomMode: state.zoomMode,
+      customScale: state.customScale,
+      resolvedViewMode: state.resolvedViewMode,
+      containerWidth: state.containerWidth,
+      containerHeight: state.containerHeight,
+      pageWidth: pageSize.width,
+      pageHeight: pageSize.height,
+    });
+  }, [
+    isReady,
+    state.pageCount,
+    state.resolvedViewMode,
+    state.containerWidth,
+    state.containerHeight,
+    state.zoomMode,
+    state.customScale,
+    source,
+  ]);
 
   // 7. Ready gate
   const showContent = isReady && state.containerWidth > 0 && state.containerHeight > 0;
 
   // 8. Render
   const contextValue = useMemo(
-    () => ({ state, dispatch, source, spreads, effectiveScale }),
-    [state, dispatch, source, spreads, effectiveScale],
+    () => ({ state, dispatch, source, spreads, effectiveScale, isOverflowing }),
+    [state, dispatch, source, spreads, effectiveScale, isOverflowing],
   );
 
   const showCurlOverlay = showContent

@@ -36,6 +36,8 @@ const baseState: FlipbookState = {
   resolvedViewMode: 'dual-cover',
   containerWidth: 1024,
   containerHeight: 768,
+  zoomMode: 'fit-page',
+  customScale: 1,
 };
 
 function makeCtxValue(stateOverride: Partial<FlipbookState> = {}, dispatch = vi.fn()): FlipbookContextValue {
@@ -45,6 +47,7 @@ function makeCtxValue(stateOverride: Partial<FlipbookState> = {}, dispatch = vi.
     source: stubSource,
     spreads: stubSpreads,
     effectiveScale: 1,
+    isOverflowing: false,
   };
 }
 
