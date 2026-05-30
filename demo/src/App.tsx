@@ -8,6 +8,7 @@ function App() {
         url="/LDEO%20Annual%20Report%202021%20-%20Print%20Version.pdf"
         viewMode="auto"
         enablePageCurl
+        defaultScale={1.5}
       />
     </div>
   );

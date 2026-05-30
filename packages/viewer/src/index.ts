@@ -25,3 +25,7 @@ export type { PdfjsSourceOptions } from './adapters/PdfjsSource';
 
 // Worker configuration (advanced usage)
 export { configurePdfWorker } from './adapters/configurePdfWorker';
+
+// Zoom (Step 5)
+export { SpecialZoomLevel } from './zoom/SpecialZoomLevel';
+export type { DefaultScale } from './zoom/types';

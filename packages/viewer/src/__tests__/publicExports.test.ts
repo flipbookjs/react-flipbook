@@ -4,6 +4,7 @@ import * as PublicApi from '../index';
 import {
   Flipbook,
   PdfjsSource,
+  SpecialZoomLevel,
   configurePdfWorker,
 } from '../index';
 
@@ -11,6 +12,7 @@ import {
 // TypeScript build fails. The runtime tests below also use them as
 // value annotations, which both compiles AND exercises the import.
 import type {
+  DefaultScale,
   FlipbookProps,
   PageSource,
   TextItem,
@@ -26,6 +28,7 @@ import type {
 const EXPECTED_RUNTIME_EXPORTS = [
   'Flipbook',
   'PdfjsSource',
+  'SpecialZoomLevel',
   'configurePdfWorker',
 ].sort();
 
@@ -42,6 +45,12 @@ describe('public API exports', () => {
     expect(typeof Flipbook).toBe('function');
     expect(typeof PdfjsSource).toBe('function');
     expect(typeof configurePdfWorker).toBe('function');
+    // SpecialZoomLevel is a string enum — at runtime it's an object with the
+    // three documented members.
+    expect(typeof SpecialZoomLevel).toBe('object');
+    expect(SpecialZoomLevel.PageFit).toBe('fit-page');
+    expect(SpecialZoomLevel.PageWidth).toBe('fit-width');
+    expect(SpecialZoomLevel.ActualSize).toBe('ActualSize');
   });
 
   it('exports types usable as value annotations', () => {
@@ -55,6 +64,18 @@ describe('public API exports', () => {
     const opts: PdfjsSourceOptions = {};
     const props: FlipbookProps = {};
     const propsWithCurl: FlipbookProps = { enablePageCurl: true };
+    // DefaultScale type — accepts strings, numbers, and SpecialZoomLevel enum members.
+    const scaleString: DefaultScale = 'fit-page';
+    const scaleNumber: DefaultScale = 1.5;
+    const scaleEnum: DefaultScale = SpecialZoomLevel.PageFit;
+    // Explicit 'ActualSize' sentinel coverage — without this line, removing
+    // 'ActualSize' from the DefaultScale union would not be caught by any
+    // existing assertion (scaleEnum uses PageFit; PageWidth/PageFit string
+    // values don't touch the 'ActualSize' branch of the union).
+    const scaleActual: DefaultScale = 'ActualSize';
+    // FlipbookProps.defaultScale accepts the same union (CMS-migration ergonomic check
+    // from architectural plan Decision 5).
+    const propsWithScale: FlipbookProps = { defaultScale: SpecialZoomLevel.PageWidth };
 
     expect(spread.right).toBe(0);
     expect(spread.left).toBeNull();
@@ -64,6 +85,11 @@ describe('public API exports', () => {
     expect(opts).toEqual({});
     expect(props).toEqual({});
     expect(propsWithCurl.enablePageCurl).toBe(true);
+    expect(scaleString).toBe('fit-page');
+    expect(scaleNumber).toBe(1.5);
+    expect(scaleEnum).toBe('fit-page');
+    expect(scaleActual).toBe('ActualSize');
+    expect(propsWithScale.defaultScale).toBe('fit-width');
   });
 
   it('PageSource is a structural interface', () => {
