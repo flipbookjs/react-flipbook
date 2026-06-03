@@ -20,6 +20,7 @@ import type {
   OutlineItem,
   PdfjsSourceOptions,
   Spread,
+  ToolbarProps,
 } from '../index';
 
 // Expected runtime exports — authoritative list. If something is added or
@@ -29,6 +30,7 @@ const EXPECTED_RUNTIME_EXPORTS = [
   'Flipbook',
   'PdfjsSource',
   'SpecialZoomLevel',
+  'Toolbar',
   'configurePdfWorker',
 ].sort();
 
@@ -76,6 +78,9 @@ describe('public API exports', () => {
     // FlipbookProps.defaultScale accepts the same union (CMS-migration ergonomic check
     // from architectural plan Decision 5).
     const propsWithScale: FlipbookProps = { defaultScale: SpecialZoomLevel.PageWidth };
+    // ToolbarProps — public type from Step 6C. Omits the internal `position`
+    // field; consumers writing a typed prop object cannot include it.
+    const toolbarProps: ToolbarProps = { compact: true, title: 'Doc' };
 
     expect(spread.right).toBe(0);
     expect(spread.left).toBeNull();
@@ -90,6 +95,8 @@ describe('public API exports', () => {
     expect(scaleEnum).toBe('fit-page');
     expect(scaleActual).toBe('ActualSize');
     expect(propsWithScale.defaultScale).toBe('fit-width');
+    expect(toolbarProps.compact).toBe(true);
+    expect(toolbarProps.title).toBe('Doc');
   });
 
   it('PageSource is a structural interface', () => {

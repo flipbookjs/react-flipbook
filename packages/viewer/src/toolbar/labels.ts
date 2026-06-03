@@ -14,6 +14,8 @@
  */
 export const LABELS = {
   toolbarLabel: 'Document viewer controls',
+  toolbarTopBarLabel: 'Document viewer top controls',
+  toolbarBottomBarLabel: 'Document viewer bottom controls',
   navigationGroupLabel: 'Page navigation',
   zoomGroupLabel: 'Zoom',
   prevPage: 'Previous page',

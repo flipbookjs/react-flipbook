@@ -103,7 +103,7 @@ export function PageRenderer({ source, pageIndex, scale }: PageRendererProps) {
 
       {/* React-managed overlays */}
       {state === 'loading' && (
-        <div className="fbjs-page-loading" aria-label="Loading page">
+        <div className="fbjs-page-loading" role="status" aria-label="Loading page">
           {/* Skeleton placeholder — CSS handles the shimmer */}
         </div>
       )}

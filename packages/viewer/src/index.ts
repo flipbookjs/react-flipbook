@@ -6,6 +6,10 @@ import './styles/flipbook.css';
 export { Flipbook } from './Flipbook';
 export type { FlipbookProps } from './Flipbook';
 
+// Toolbar (Step 6C)
+export { Toolbar } from './toolbar/Toolbar';
+export type { ToolbarProps } from './toolbar/Toolbar';
+
 // PageSource interface
 export type {
   PageSource,

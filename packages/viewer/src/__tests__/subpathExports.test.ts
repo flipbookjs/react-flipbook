@@ -40,6 +40,7 @@ const EXPECTED_RUNTIME_EXPORTS = [
   'PageReadout',
   'ZoomReadout',
   'LABELS',
+  'Toolbar',
 ].sort();
 
 describe('toolbar-parts sub-path public API', () => {

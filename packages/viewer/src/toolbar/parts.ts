@@ -28,3 +28,7 @@ export { ZoomReadout } from './readouts/ZoomReadout';
 
 // Labels (read-only — consumers introspect; v0.2 will add an override surface).
 export { LABELS } from './labels';
+
+// Built-in wrapper (Step 6C).
+export { Toolbar } from './Toolbar';
+export type { ToolbarProps } from './Toolbar';

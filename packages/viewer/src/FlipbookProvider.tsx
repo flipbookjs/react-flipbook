@@ -65,6 +65,19 @@ interface FlipbookProviderProps {
    *  mount; subsequent prop changes are ignored (matches `defaultScale`'s
    *  uncontrolled semantics). 6C surfaces this as a `<Flipbook>` prop. */
   initialTheme?: 'light' | 'dark';
+  /** Called on every runtime theme change after `setTheme` / `toggleTheme`
+   *  dispatches. NOT called when the reducer is seeded with `initialTheme`
+   *  on mount — `onThemeChange` is for runtime transitions only. The new
+   *  theme is passed as the argument; reading `useFlipbook().state.theme`
+   *  inside the callback would see the OLD value because React hasn't
+   *  committed yet. Ref-mirrored so inline arrow-function consumers see
+   *  the latest callback identity on every dispatch. */
+  onThemeChange?: (theme: 'light' | 'dark') => void;
+  /** Top-bar node rendered above the container inside `.fbjs-root`. Computed
+   *  by `<Flipbook>` from the `toolbar` prop dispatch. Pass `null` to omit. */
+  toolbarTopNode?: ReactNode | null;
+  /** Bottom-bar node rendered below the container inside `.fbjs-root`. */
+  toolbarBottomNode?: ReactNode | null;
   /** Optional test/integration children mounted inside the full context
    *  stack (Flipbook + Store + PageRegistry) but OUTSIDE the visible
    *  `.fbjs-container` div, so they have access to all the public hooks
@@ -85,6 +98,9 @@ export function FlipbookProvider({
   enablePageCurl = false,
   defaultScale = 'fit-page',
   initialTheme = 'light',
+  onThemeChange,
+  toolbarTopNode = null,
+  toolbarBottomNode = null,
   children,
 }: FlipbookProviderProps) {
   // 1. Reducer
@@ -95,6 +111,16 @@ export function FlipbookProvider({
     undefined,
     () => createInitialState(viewMode ?? 'auto', defaultScale, initialTheme),
   );
+
+  const onThemeChangeRef = useRef(onThemeChange);
+  useIsomorphicLayoutEffect(() => {
+    onThemeChangeRef.current = onThemeChange;
+  }, [onThemeChange]);
+
+  const themeRef = useRef(state.theme);
+  useIsomorphicLayoutEffect(() => {
+    themeRef.current = state.theme;
+  }, [state.theme]);
 
   // Dev-mode warning when defaultScale changes after mount. The prop is
   // uncontrolled by design (initial-state factory only; consumer must remount
@@ -494,8 +520,15 @@ export function FlipbookProvider({
   const enterFullScreen    = useCallback((): Promise<void> => Promise.resolve(), []);  // 6E
   const exitFullScreen     = useCallback((): Promise<void> => Promise.resolve(), []);  // 6E
   const toggleFullScreen   = useCallback((): Promise<void> => Promise.resolve(), []);  // 6E
-  const setTheme           = useCallback((_theme: 'light' | 'dark') => {},        []); // 6C
-  const toggleTheme        = useCallback(() => {},                                  []); // 6C
+  const setTheme = useCallback((theme: 'light' | 'dark') => {
+    dispatch({ type: 'SET_THEME', value: theme });
+    onThemeChangeRef.current?.(theme);
+  }, [dispatch]);
+  const toggleTheme = useCallback(() => {
+    const next = themeRef.current === 'dark' ? 'light' : 'dark';
+    dispatch({ type: 'SET_THEME', value: next });
+    onThemeChangeRef.current?.(next);
+  }, [dispatch]);
   const setInteractionMode = useCallback((_mode: 'select' | 'pan') => {},          []); // 6E
 
   // Source-bound stubs — rotate on source change (per Decision 1 contract).
@@ -680,44 +713,48 @@ export function FlipbookProvider({
       <FlipbookStoreContext.Provider value={storeValue}>
         <PageRegistryWriteContext.Provider value={pageRegistry.write}>
           <PageRegistryReadContext.Provider value={pageRegistry.read}>
-            <div
-              ref={containerRef}
-              className="fbjs-container"
-              role="region"
-              aria-label="Document viewer"
-              tabIndex={0}
-            >
-              {currentError && (
-                renderError?.(currentError) ?? (
-                  <div role="alert" className="fbjs-error">
-                    <p>Unable to load document</p>
-                    <p>{currentError.message}</p>
+            <div className="fbjs-root" data-theme={state.theme}>
+              {toolbarTopNode}
+              <div
+                ref={containerRef}
+                className="fbjs-container"
+                role="region"
+                aria-label="Document viewer"
+                tabIndex={0}
+              >
+                {currentError && (
+                  renderError?.(currentError) ?? (
+                    <div role="alert" className="fbjs-error">
+                      <p>Unable to load document</p>
+                      <p>{currentError.message}</p>
+                    </div>
+                  )
+                )}
+                {!showContent && !currentError && (
+                  renderLoading?.() ?? <LoadingState />
+                )}
+                {showContent && (
+                  <div
+                    ref={stageRef}
+                    data-testid="fbjs-ready"
+                    className="fbjs-stage"
+                    data-overflowing={isOverflowing ? 'true' : undefined}
+                  >
+                    <ErrorBoundary>
+                      <SpreadRenderer />
+                      <AriaAnnouncer />
+                      {showCurlOverlay && (
+                        <CurlChunkErrorBoundary>
+                          <Suspense fallback={null}>
+                            <LazyCurlOverlay stageRef={stageRef} />
+                          </Suspense>
+                        </CurlChunkErrorBoundary>
+                      )}
+                    </ErrorBoundary>
                   </div>
-                )
-              )}
-              {!showContent && !currentError && (
-                renderLoading?.() ?? <LoadingState />
-              )}
-              {showContent && (
-                <div
-                  ref={stageRef}
-                  data-testid="fbjs-ready"
-                  className="fbjs-stage"
-                  data-overflowing={isOverflowing ? 'true' : undefined}
-                >
-                  <ErrorBoundary>
-                    <SpreadRenderer />
-                    <AriaAnnouncer />
-                    {showCurlOverlay && (
-                      <CurlChunkErrorBoundary>
-                        <Suspense fallback={null}>
-                          <LazyCurlOverlay stageRef={stageRef} />
-                        </Suspense>
-                      </CurlChunkErrorBoundary>
-                    )}
-                  </ErrorBoundary>
-                </div>
-              )}
+                )}
+              </div>
+              {toolbarBottomNode}
             </div>
             {children}
           </PageRegistryReadContext.Provider>
