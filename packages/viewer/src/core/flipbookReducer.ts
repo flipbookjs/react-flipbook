@@ -14,6 +14,30 @@ export interface FlipbookState {
   zoomMode: 'fit-page' | 'fit-width' | 'custom';
   /** Only meaningful when zoomMode === 'custom'. Clamped to [MIN_SCALE, MAX_SCALE]. */
   customScale: number;
+  // ---- Step 6A additions (Decision 1 of step-6-architectural-plan.md) ----
+  /** Tracks whether the viewer is currently in fullscreen. Mirrors
+   *  `document.fullscreenElement` reality via fullscreenchange events; not
+   *  user-intent. Reset semantics on SOURCE_CHANGED: KEPT (browser fullscreen
+   *  survives source changes; reducer must not lie). 6E owns the body. */
+  isFullScreen: boolean;
+  /** Current theme. Seeded by `createInitialState` from the `initialTheme`
+   *  parameter (default `'light'`). 6C wires the `<Flipbook initialTheme>` prop;
+   *  runtime changes via `actions.setTheme()` / `actions.toggleTheme()` (6C
+   *  implements the action bodies). Reset on SOURCE_CHANGED: KEPT. */
+  theme: 'light' | 'dark';
+  /** Text-select vs hand-pan mode. 6E implements the pan-mode click-drag
+   *  handler + the action body. Reset on SOURCE_CHANGED: KEPT (user preference). */
+  interactionMode: 'select' | 'pan';
+  /** True while the print render pipeline is rendering pages. 6F owns the
+   *  pipeline. Reset on SOURCE_CHANGED: TRUE → FALSE (an in-flight print for
+   *  the old source is invalid; the AbortController in 6F's print hook is the
+   *  primary defense, this reset is the backstop). */
+  isPrinting: boolean;
+  /** Surface of print-pipeline errors (currently only the
+   *  `printMaxPages`-ceiling rejection). Cleared on dismiss click,
+   *  `printErrorDismissMs` timer (effect-owned in 6F), or SOURCE_CHANGED.
+   *  6F dispatches SET_PRINT_ERROR / CLEAR_PRINT_ERROR. */
+  printError: { type: 'too-large'; totalPages: number; limit: number } | null;
 }
 
 export type FlipbookAction =
@@ -23,7 +47,14 @@ export type FlipbookAction =
   | { type: 'SET_VIEW_MODE'; mode: 'single' | 'dual-cover' | 'auto' }
   | { type: 'CONTAINER_RESIZED'; width: number; height: number }
   | { type: 'SOURCE_CHANGED'; pageCount: number; initialSpreadIndex?: number }
-  | { type: 'SET_ZOOM'; mode: 'fit-page' | 'fit-width' | 'custom'; customScale?: number };
+  | { type: 'SET_ZOOM'; mode: 'fit-page' | 'fit-width' | 'custom'; customScale?: number }
+  // ---- Step 6A additions ----
+  | { type: 'SET_FULLSCREEN'; value: boolean }
+  | { type: 'SET_THEME'; value: 'light' | 'dark' }
+  | { type: 'SET_INTERACTION_MODE'; value: 'select' | 'pan' }
+  | { type: 'SET_PRINTING'; value: boolean }
+  | { type: 'SET_PRINT_ERROR'; payload: { type: 'too-large'; totalPages: number; limit: number } }
+  | { type: 'CLEAR_PRINT_ERROR' };
 
 export function clampSpreadIndex(index: number, spreadCount: number): number {
   if (spreadCount <= 0) return 0;
@@ -88,6 +119,7 @@ export function resolveDefaultScale(
 export function createInitialState(
   viewMode: 'single' | 'dual-cover' | 'auto' = 'auto',
   defaultScale: DefaultScale = 'fit-page',
+  initialTheme: 'light' | 'dark' = 'light',
 ): FlipbookState {
   const resolvedViewMode = viewMode === 'auto' ? 'single' : viewMode;
   const { zoomMode, customScale } = resolveDefaultScale(defaultScale);
@@ -101,6 +133,12 @@ export function createInitialState(
     containerHeight: 0,
     zoomMode,
     customScale,
+    // ---- Step 6A additions ----
+    isFullScreen: false,
+    theme: initialTheme,
+    interactionMode: 'select',
+    isPrinting: false,
+    printError: null,
   };
 }
 
@@ -182,11 +220,17 @@ export function flipbookReducer(state: FlipbookState, action: FlipbookAction): F
 
     case 'SOURCE_CHANGED': {
       const newSpreadCount = computeSpreadCount(action.pageCount, state.resolvedViewMode);
+      // Decision 1 reset matrix: printError + isPrinting reset; theme,
+      // interactionMode, isFullScreen KEPT (browser fullscreen mirrors
+      // document.fullscreenElement reality; user preferences persist across
+      // source changes).
       return {
         ...state,
         pageCount: action.pageCount,
         spreadCount: newSpreadCount,
         currentSpreadIndex: clampSpreadIndex(action.initialSpreadIndex ?? 0, newSpreadCount),
+        printError: null,
+        isPrinting: false,
       };
     }
 
@@ -210,5 +254,31 @@ export function flipbookReducer(state: FlipbookState, action: FlipbookAction): F
       if (state.zoomMode === action.mode) return state;
       return { ...state, zoomMode: action.mode };
     }
+
+    case 'SET_FULLSCREEN':
+      if (state.isFullScreen === action.value) return state;
+      return { ...state, isFullScreen: action.value };
+
+    case 'SET_THEME':
+      if (state.theme === action.value) return state;
+      return { ...state, theme: action.value };
+
+    case 'SET_INTERACTION_MODE':
+      if (state.interactionMode === action.value) return state;
+      return { ...state, interactionMode: action.value };
+
+    case 'SET_PRINTING':
+      if (state.isPrinting === action.value) return state;
+      return { ...state, isPrinting: action.value };
+
+    case 'SET_PRINT_ERROR':
+      // Re-dispatch with same payload still rotates identity — Decision 7
+      // requires this so the auto-dismiss effect resets the timer on every
+      // user click.
+      return { ...state, printError: { ...action.payload } };
+
+    case 'CLEAR_PRINT_ERROR':
+      if (state.printError === null) return state;
+      return { ...state, printError: null };
   }
 }

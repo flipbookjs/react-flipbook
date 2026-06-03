@@ -1,9 +1,9 @@
 import type { ReactNode } from 'react';
-import { useFlipbook } from '../core/FlipbookContext';
+import { useFlipbookContext } from '../core/FlipbookContext';
 import { PageRenderer } from './PageRenderer';
 
 export function SpreadRenderer() {
-  const { state, source, spreads, effectiveScale } = useFlipbook();
+  const { state, source, spreads, effectiveScale } = useFlipbookContext();
   const { currentSpreadIndex, resolvedViewMode } = state;
 
   // 0-page documents: spreads is empty, and source.getPageSize(0) would crash

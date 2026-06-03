@@ -1,7 +1,6 @@
 import {
   useReducer,
   useEffect,
-  useLayoutEffect,
   useRef,
   useMemo,
   useCallback,
@@ -13,13 +12,12 @@ import { useWheelRouter } from './zoom/useWheelRouter';
 import type { PageSource } from './types/PageSource';
 import { usePageSource } from './hooks/usePageSource';
 import { flipbookReducer, createInitialState } from './core/flipbookReducer';
-import { computeSpreads, pageToSpreadIndex } from './core/computeSpreads';
+import { computeSpreads } from './core/computeSpreads';
 import { LoadingState } from './components/LoadingState';
 import { FlipbookContext } from './core/FlipbookContext';
 import { SpreadRenderer } from './components/SpreadRenderer';
 import { AriaAnnouncer } from './components/AriaAnnouncer';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { useKeyboard } from './hooks/useKeyboard';
 import {
   PageRegistryWriteContext,
   PageRegistryReadContext,
@@ -28,6 +26,20 @@ import {
 import { CurlChunkErrorBoundary } from './curl/CurlChunkErrorBoundary';
 import { deriveEffectiveScaleAndOverflow } from './zoom/derivation';
 import type { DefaultScale } from './zoom/types';
+import { FlipbookStoreContext } from './core/FlipbookStoreContext';
+import {
+  SSR_SNAPSHOT,
+  type FlipbookHookActions,
+  type FlipbookHookHelpers,
+  type FlipbookHookState,
+  type FlipbookSnapshot,
+} from './hooks/useFlipbook';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { useIsomorphicLayoutEffect } from './hooks/useIsomorphicLayoutEffect';
+import { devWarn } from './core/devWarn';
+import { increase, decrease } from './zoom/zoomingLevel';
+import { SpecialZoomLevel } from './zoom/SpecialZoomLevel';
+import { pageToSpreadIndex as findSpreadByPageIndex } from './core/computeSpreads';
 
 /**
  * Curl engine is delivered as a separate chunk loaded only when `enablePageCurl === true`.
@@ -49,6 +61,19 @@ interface FlipbookProviderProps {
   /** Initial zoom mode or scale. Wired to 5A's `createInitialState(viewMode, defaultScale)`
    *  factory parameter. Defaults to `'fit-page'`. */
   defaultScale?: DefaultScale;
+  /** Seed the reducer's initial `theme` field. Default 'light'. Read once at
+   *  mount; subsequent prop changes are ignored (matches `defaultScale`'s
+   *  uncontrolled semantics). 6C surfaces this as a `<Flipbook>` prop. */
+  initialTheme?: 'light' | 'dark';
+  /** Optional test/integration children mounted inside the full context
+   *  stack (Flipbook + Store + PageRegistry) but OUTSIDE the visible
+   *  `.fbjs-container` div, so they have access to all the public hooks
+   *  (`useFlipbook`, `useFlipbookSelector`, `useFlipbookActions`,
+   *  `useFlipbookContext`) without interfering with the viewer UI.
+   *  `Flipbook.tsx` does NOT pass children; this is for renderHook-based
+   *  tests in Phase 7 and for advanced consumers who need to render an
+   *  ad-hoc component alongside the viewer with shared state. */
+  children?: ReactNode;
 }
 
 export function FlipbookProvider({
@@ -59,6 +84,8 @@ export function FlipbookProvider({
   renderLoading,
   enablePageCurl = false,
   defaultScale = 'fit-page',
+  initialTheme = 'light',
+  children,
 }: FlipbookProviderProps) {
   // 1. Reducer
   // useReducer's lazy init takes a single argument; bundle viewMode + defaultScale
@@ -66,7 +93,7 @@ export function FlipbookProvider({
   const [state, dispatch] = useReducer(
     flipbookReducer,
     undefined,
-    () => createInitialState(viewMode ?? 'auto', defaultScale),
+    () => createInitialState(viewMode ?? 'auto', defaultScale, initialTheme),
   );
 
   // Dev-mode warning when defaultScale changes after mount. The prop is
@@ -92,11 +119,26 @@ export function FlipbookProvider({
   const currentError = sourceState.status === 'error' && sourceState.source === source
     ? sourceState.error
     : null;
+  // 2a. Source-status fields surfaced into FlipbookContextValue (6A — Decision 1).
+  // SourceState's 'loading' branch has NO `source` field (see usePageSource.ts:
+  // `{ status: 'loading' } | { status: 'ready'; source } | { status: 'error'; ... source }`),
+  // so we MUST narrow on `status` before reading `.source`. The narrowing also
+  // implements the stale-source guard that `isReady`/`currentError` already use:
+  // when the consumer changes `<Flipbook url=...>`, there's a render window
+  // where sourceState still carries the OLD source. During that window we
+  // report 'loading' so consumers don't render the old document under a new
+  // status.
+  const sourceStatus: 'loading' | 'ready' | 'error' =
+    (sourceState.status === 'ready' || sourceState.status === 'error') &&
+    sourceState.source === source
+      ? sourceState.status
+      : 'loading';
+  const sourceError: Error | null = currentError;
 
   // 3. SOURCE_CHANGED dispatch
   const processedSourceRef = useRef<PageSource | null>(null);
 
-  useLayoutEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     if (!isReady) return;
     if (processedSourceRef.current === source) return; // already dispatched for this source
 
@@ -106,7 +148,7 @@ export function FlipbookProvider({
     const pageCount = source.getPageCount();
     if (isFirst) {
       const spreads = computeSpreads(pageCount, state.resolvedViewMode);
-      const initialSpreadIndex = pageToSpreadIndex(initialPage ?? 0, spreads);
+      const initialSpreadIndex = findSpreadByPageIndex(initialPage ?? 0, spreads);
       dispatch({ type: 'SOURCE_CHANGED', pageCount, initialSpreadIndex });
     } else {
       dispatch({ type: 'SOURCE_CHANGED', pageCount });
@@ -147,9 +189,6 @@ export function FlipbookProvider({
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
-
-  // 5b. Keyboard navigation
-  useKeyboard(containerRef, dispatch, state.spreadCount);
 
   // 5c. Curl chunk preload (3B) — when enablePageCurl is true, fetch the lazy
   // chunk on mount so the user's first gesture doesn't race the network. The
@@ -284,9 +323,337 @@ export function FlipbookProvider({
 
   // 8. Render
   const contextValue = useMemo(
-    () => ({ state, dispatch, source, spreads, effectiveScale, isOverflowing, registerCurlWheelHandler }),
-    [state, dispatch, source, spreads, effectiveScale, isOverflowing, registerCurlWheelHandler],
+    () => ({
+      state, dispatch, source, spreads, effectiveScale, isOverflowing, registerCurlWheelHandler,
+      sourceStatus, sourceError,
+    }),
+    [
+      state, dispatch, source, spreads, effectiveScale, isOverflowing, registerCurlWheelHandler,
+      sourceStatus, sourceError,
+    ],
   );
+
+  // ============================================================
+  // Step 6A: Public hook layer — actions, helpers, snapshot store
+  // ============================================================
+
+  // ---- Refs mirroring state/derived values that source-rotating actions
+  //      need to read at call time. The provider's actions stay [dispatch]-
+  //      stable (do not rotate on every state change) by reading these refs
+  //      inside the callback bodies. Per-action dep contract is Decision 1
+  //      of the parent plan. Note: `react-hooks/exhaustive-deps` is NOT
+  //      enabled in this repo's eslint config (see eslint.config.js — only
+  //      `@typescript-eslint` is loaded). The action-stability test (Phase 7)
+  //      is the SOLE protection against accidental dep-array drift. If
+  //      `eslint-plugin-react-hooks` is added later, the `// eslint-disable-
+  //      next-line` comments on each action's deps below become the
+  //      enforcement mechanism — but right now they're documentation, not
+  //      lint-time gates. Phase 0 Step 0.5 verifies the current state.
+  //
+  // CRITICAL — `effectiveScaleRef` is REUSED from the existing wheel-router
+  // setup (line 230 of the existing FlipbookProvider.tsx). Do NOT redeclare it
+  // here — that would be a TypeScript compile error (block-scoped const
+  // re-declaration). Both the wheel router and the new zoom actions need to
+  // read the latest `effectiveScale` outside of render; one ref serves both.
+  // Same applies to `isOverflowingRef` and `isReadyRef` if a downstream sub-
+  // plan needs them — reuse the existing wheel-router declarations.
+  //
+  // The four refs below are NEW (no name collision with the existing wheel-
+  // router refs).
+  //
+  // Note on inline assignment during render: `pageCountRef.current = state.pageCount`
+  // is a side effect during the render phase. React's docs flag this as
+  // non-recommended in favor of the post-commit `useEffect(() => { ref.current
+  // = value }, [value])` pattern. We use inline assignment here because all
+  // ref READERS are user-event handlers (action callbacks fired from button
+  // clicks; keyboard listener fired from keydown events). User events fire
+  // AFTER React commits, so even if a concurrent render is discarded mid-flight,
+  // the next committed render's inline assignment overwrites the discarded
+  // value before any reader runs. If a future sub-plan reads these refs
+  // DURING a render (e.g., from a child component's render body), migrate to
+  // the useEffect-based assignment to be concurrent-mode safe.
+
+  const spreadCountRef = useRef(state.spreadCount);
+  spreadCountRef.current = state.spreadCount;
+
+  const pageCountRef = useRef(state.pageCount);
+  pageCountRef.current = state.pageCount;
+
+  const spreadsRef = useRef(spreads);
+  spreadsRef.current = spreads;
+
+  const sourceStatusRef = useRef(sourceStatus);
+  sourceStatusRef.current = sourceStatus;
+
+  // ---- Actions (18 total) ----
+  // All actions are [dispatch]-stable EXCEPT `print` and `download` which
+  // close over `source` (per Decision 1 — they rotate on url change so 6F's
+  // implementation can read the latest source instance). Every other action
+  // reads state/derived values via the refs above.
+
+  const next      = useCallback(() => dispatch({ type: 'NEXT_SPREAD' }),                              [dispatch]);
+  const previous  = useCallback(() => dispatch({ type: 'PREV_SPREAD' }),                              [dispatch]);
+  const goToFirst = useCallback(() => dispatch({ type: 'GO_TO_SPREAD', index: 0 }),                   [dispatch]);
+
+  // goToLast: status guard for developer-facing correctness, NOT for reducer
+  // safety. The reducer's `clampSpreadIndex(index, spreadCount)` at
+  // flipbookReducer.ts:28-31 short-circuits to 0 when `spreadCount <= 0`, and
+  // clamps `Math.max(0, Math.min(index, spreadCount-1))` otherwise — so
+  // `GO_TO_SPREAD { index: -1 }` lands at spreadIndex=0 either way. The
+  // reducer-level behavior is safe.
+  //
+  // What the guard prevents is a SILENT no-op during development: a dev calls
+  // `goToLast()` during the loading window (spreadCountRef.current === 0),
+  // expects to land on the last spread, and sees nothing happen (because
+  // currentSpreadIndex is already 0). Without the guard, that surface zero
+  // signal — no error, no warning, no log. With the guard, devWarn fires
+  // once-per-mount with the actual `status` value, pointing the dev at the
+  // real fix (`await ready` before calling). Same warned-ref pattern as
+  // goToPage. goToFirst doesn't need this because `index: 0` matches the
+  // reducer's clamp target in both states (loading and ready) and is the
+  // expected destination either way — no surprising no-op. `next`/`previous`
+  // are also safe because NEXT_SPREAD/PREV_SPREAD are clamp-by-construction
+  // in the reducer. The End-key keyboard shortcut routes through this action
+  // (see Phase 4.5) so the dev-warning covers both invocation paths.
+  const goToLastNotReadyWarnedRef = useRef(false);
+  const goToLast = useCallback(() => {
+    if (sourceStatusRef.current !== 'ready') {
+      if (!goToLastNotReadyWarnedRef.current) {
+        goToLastNotReadyWarnedRef.current = true;
+        devWarn(
+          `[flipbook] actions.goToLast() called while status='${sourceStatusRef.current}'. No-op until status='ready'. This warning fires once per provider mount.`,
+        );
+      }
+      return;
+    }
+    dispatch({ type: 'GO_TO_SPREAD', index: spreadCountRef.current - 1 });
+  }, [dispatch]);
+
+  // goToPage: 1-indexed contract. Decision 1's helper spec rejects NaN /
+  // non-integer / out-of-range with a one-shot dev warning. Also rejects calls
+  // while status !== 'ready' — without this guard, the action would dispatch
+  // GO_TO_SPREAD against an empty reducer state (pageCount=0, spreadCount=0),
+  // which would clamp to spreadIndex 0 (no-op) but pollute the dispatch log.
+  //
+  // TWO warned-refs (not one): "called during loading" and "called with invalid
+  // input" are distinct classes of bug, each deserving its own one-shot warning.
+  // A user who hits one bug during development shouldn't be silenced from
+  // discovering the other later.
+  const goToPageNotReadyWarnedRef = useRef(false);
+  const goToPageInvalidWarnedRef  = useRef(false);
+  const goToPage = useCallback((pageNumber: number) => {
+    if (sourceStatusRef.current !== 'ready') {
+      if (!goToPageNotReadyWarnedRef.current) {
+        goToPageNotReadyWarnedRef.current = true;
+        devWarn(
+          `[flipbook] actions.goToPage(${pageNumber}) called while status='${sourceStatusRef.current}'. No-op until status='ready'. This warning fires once per provider mount.`,
+        );
+      }
+      return;
+    }
+    const totalPages = pageCountRef.current;
+    if (!Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > totalPages) {
+      if (!goToPageInvalidWarnedRef.current) {
+        goToPageInvalidWarnedRef.current = true;
+        devWarn(
+          `[flipbook] actions.goToPage(${pageNumber}) — invalid input (must be a positive integer ≤ totalPages=${totalPages}). No-op. This warning fires once per provider mount.`,
+        );
+      }
+      return;
+    }
+    const spreadIndex = findSpreadByPageIndex(pageNumber - 1, spreadsRef.current);
+    dispatch({ type: 'GO_TO_SPREAD', index: spreadIndex });
+  }, [dispatch]);
+
+  const zoomIn = useCallback(() => {
+    const nextScale = increase(effectiveScaleRef.current);
+    dispatch({ type: 'SET_ZOOM', mode: 'custom', customScale: nextScale });
+  }, [dispatch]);
+
+  const zoomOut = useCallback(() => {
+    const nextScale = decrease(effectiveScaleRef.current);
+    dispatch({ type: 'SET_ZOOM', mode: 'custom', customScale: nextScale });
+  }, [dispatch]);
+
+  const setZoom = useCallback((scale: DefaultScale) => {
+    if (scale === 'fit-page' || scale === 'fit-width') {
+      dispatch({ type: 'SET_ZOOM', mode: scale });
+      return;
+    }
+    if (scale === SpecialZoomLevel.ActualSize) {
+      dispatch({ type: 'SET_ZOOM', mode: 'custom', customScale: 1 });
+      return;
+    }
+    dispatch({ type: 'SET_ZOOM', mode: 'custom', customScale: scale });
+  }, [dispatch]);
+
+  const fitPage  = useCallback(() => dispatch({ type: 'SET_ZOOM', mode: 'fit-page'  }), [dispatch]);
+  const fitWidth = useCallback(() => dispatch({ type: 'SET_ZOOM', mode: 'fit-width' }), [dispatch]);
+
+  // Stub actions — bodies replaced by downstream sub-plans. Signatures stable.
+  const enterFullScreen    = useCallback((): Promise<void> => Promise.resolve(), []);  // 6E
+  const exitFullScreen     = useCallback((): Promise<void> => Promise.resolve(), []);  // 6E
+  const toggleFullScreen   = useCallback((): Promise<void> => Promise.resolve(), []);  // 6E
+  const setTheme           = useCallback((_theme: 'light' | 'dark') => {},        []); // 6C
+  const toggleTheme        = useCallback(() => {},                                  []); // 6C
+  const setInteractionMode = useCallback((_mode: 'select' | 'pan') => {},          []); // 6E
+
+  // Source-bound stubs — rotate on source change (per Decision 1 contract).
+  // 6F replaces the bodies with the actual print pipeline + download.
+  const print: () => Promise<void> = useCallback(() => Promise.resolve(), [source]);
+  const download: () => void       = useCallback(() => {},                [source]);
+
+  // ---- Actions object: useMemo so identity is stable across non-source-
+  //      change renders. Every action ref above is stable except print/download
+  //      (which rotate on source change), so this memo rotates only when
+  //      source rotates. useFlipbookActions reads this via Object.is.
+  const actions = useMemo<FlipbookHookActions>(() => ({
+    next, previous, goToPage, goToFirst, goToLast,
+    zoomIn, zoomOut, setZoom, fitPage, fitWidth,
+    enterFullScreen, exitFullScreen, toggleFullScreen,
+    setTheme, toggleTheme,
+    setInteractionMode,
+    print, download,
+  }), [
+    next, previous, goToPage, goToFirst, goToLast,
+    zoomIn, zoomOut, setZoom, fitPage, fitWidth,
+    enterFullScreen, exitFullScreen, toggleFullScreen,
+    setTheme, toggleTheme,
+    setInteractionMode,
+    print, download,
+  ]);
+
+  // ---- Helpers ----
+  // canFullScreen detected once at mount via SSR-safe check; canDownload is
+  // always false in 6A (6F enables via getSourceUrl). pageToSpreadIndex is
+  // the 1-indexed public helper — a thin validation wrapper over the
+  // 0-indexed internal `findSpreadByPageIndex` (computeSpreads.ts).
+  //
+  // The helper reads state via REFS (same pattern as `goToPage` above) so:
+  //   1. Consumers who cache `helpers.pageToSpreadIndex` get always-current
+  //      results — no stale closures.
+  //   2. The `helpers` useMemo deps narrow to [canFullScreen], which is
+  //      effectively constant after mount. So helpers identity is STABLE for
+  //      the provider's lifetime — fewer cascading snapshot rotations for
+  //      subscribers that read e.g. only `helpers.canDownload`.
+  //
+  // 6F will reintroduce a dep when it adds `canDownload` based on
+  // `getSourceUrl()` — at that point, helpers will rotate on source change,
+  // matching the action-stability contract.
+  const canFullScreen = useMemo(
+    () => typeof document !== 'undefined' && document.fullscreenEnabled,
+    [],
+  );
+  const helpers = useMemo<FlipbookHookHelpers>(() => ({
+    canDownload: false,   // 6F overwrites via getSourceUrl detection
+    canFullScreen,
+    pageToSpreadIndex: (pageNumber: number): number => {
+      if (sourceStatusRef.current !== 'ready') return -1;
+      if (!Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > pageCountRef.current) return -1;
+      // The internal helper returns 0 (clamped) for not-found, but our bounds
+      // check above guarantees the page is in range — so the result is the
+      // real spread index.
+      return findSpreadByPageIndex(pageNumber - 1, spreadsRef.current);
+    },
+  }), [canFullScreen]);   // narrow deps — pageToSpreadIndex reads live state via refs
+
+  // ---- Curated hook state (the `state` field of FlipbookSnapshot / FlipbookHook) ----
+  const hookState = useMemo<FlipbookHookState>(() => {
+    const currentSpread = spreads[state.currentSpreadIndex];
+    const anchorPage0 = currentSpread
+      ? (currentSpread.left ?? currentSpread.right ?? 0)
+      : 0;
+    return {
+      pageNumber: state.pageCount > 0 ? anchorPage0 + 1 : 1,
+      totalPages: state.pageCount,
+      spreadIndex: state.currentSpreadIndex,
+      spreadCount: state.spreadCount,
+      viewMode: state.viewMode,
+      resolvedViewMode: state.resolvedViewMode,
+      zoomMode: state.zoomMode,
+      customScale: state.customScale,
+      effectiveScale,
+      isOverflowing,
+      isFullScreen: state.isFullScreen,
+      theme: state.theme,
+      interactionMode: state.interactionMode,
+      isPrinting: state.isPrinting,
+      printError: state.printError,
+    };
+  }, [
+    spreads, state.currentSpreadIndex, state.pageCount, state.spreadCount,
+    state.viewMode, state.resolvedViewMode, state.zoomMode, state.customScale,
+    effectiveScale, isOverflowing,
+    state.isFullScreen, state.theme, state.interactionMode, state.isPrinting, state.printError,
+  ]);
+
+  // ---- Snapshot store (commit-only) ----
+  // The candidate snapshot is built during render. The ref is mutated AND
+  // listeners are notified in a layout effect — gating both on commit prevents
+  // discarded concurrent renders from leaking through getSnapshot().
+  const nextSnapshot = useMemo<FlipbookSnapshot>(() => ({
+    status: sourceStatus,
+    error: sourceError,
+    source: sourceStatus === 'ready' ? source : null,
+    state: hookState,
+    actions,
+    helpers,
+  }), [sourceStatus, sourceError, source, hookState, actions, helpers]);
+
+  const snapshotRef = useRef<FlipbookSnapshot>(nextSnapshot);
+  const listenersRef = useRef<Set<() => void>>(new Set());
+
+  // Commit-only snapshot update + listener notification. `useIsomorphicLayoutEffect`
+  // falls back to `useEffect` on the server (where layout effects are
+  // semantically meaningless and older React versions emit a warning;
+  // React 18+ — including the 19.x currently installed — generally skip
+  // the warning, but the helper keeps us defensive across all targets).
+  //
+  // The listeners in `listenersRef.current` are the functions React passes via
+  // useSyncExternalStore's `subscribe(listener)` argument — they are React's
+  // internal store-subscription callbacks, NOT user-defined functions. We do
+  // NOT wrap the iteration in try/catch: if a listener throws, that surfaces
+  // either a corrupted listener set (a bug we want to crash on) or a selector
+  // that threw on snapshot re-read (which React's reconciler propagates to the
+  // nearest <ErrorBoundary> — the documented, idiomatic place to handle it).
+  // Swallowing the throw here would hide both classes of bug from React's
+  // error-boundary mechanism. The Redux precedent for swallowing is not
+  // analogous: Redux subscribers are user-defined functions executed outside
+  // React's reconciliation; ours are React-internal callbacks executed inside it.
+  useIsomorphicLayoutEffect(() => {
+    snapshotRef.current = nextSnapshot;
+    listenersRef.current.forEach((listener) => listener());
+  }, [nextSnapshot]);
+
+  const subscribe = useCallback((listener: () => void) => {
+    listenersRef.current.add(listener);
+    return () => { listenersRef.current.delete(listener); };
+  }, []);
+  const getSnapshot = useCallback(() => snapshotRef.current, []);
+  const getServerSnapshot = useCallback(() => SSR_SNAPSHOT, []);
+
+  const storeValue = useMemo(
+    () => ({ subscribe, getSnapshot, getServerSnapshot }),
+    [subscribe, getSnapshot, getServerSnapshot],
+  );
+
+  // ---- Keyboard shortcuts (replaces the old useKeyboard call at line 152) ----
+  // Wired with the `actions` object so Ctrl+0/+/-, f, End, and Escape route
+  // through the public action layer rather than building raw dispatches.
+  // Editable-target suppression + Escape exemption are inside the hook (Decision 4).
+  //
+  // Signature change vs. the old `useKeyboard`: the new hook does NOT take a
+  // `spreadCount` argument. The End-key bounds come from `actions.goToLast()`
+  // (which reads `spreadCountRef` defined above). This is what lets the
+  // keydown listener be permanently bound: nothing the hook reads is
+  // per-render-fresh — everything routes through stable refs.
+  //
+  // IMPORTANT: this call replaces the existing `useKeyboard(containerRef,
+  // dispatch, state.spreadCount)` at the original FlipbookProvider.tsx line 152.
+  // Phase 6 deletes that old call site. The new call site lives HERE (Step 5.3)
+  // because it depends on `actions` (defined above) which doesn't exist at the
+  // old line 152.
+  useKeyboardShortcuts(containerRef, dispatch, actions);
 
   // Decision 10: curl needs the full spread visible. When isOverflowing flips true
   // (zoom past fit-page), the overlay unmounts; useCurlMode cleanup runs; curl
@@ -310,49 +677,52 @@ export function FlipbookProvider({
 
   return (
     <FlipbookContext.Provider value={contextValue}>
-      <PageRegistryWriteContext.Provider value={pageRegistry.write}>
-        <PageRegistryReadContext.Provider value={pageRegistry.read}>
-          <div
-            ref={containerRef}
-            className="fbjs-container"
-            role="region"
-            aria-label="Document viewer"
-            tabIndex={0}
-          >
-            {currentError && (
-              renderError?.(currentError) ?? (
-                <div role="alert" className="fbjs-error">
-                  <p>Unable to load document</p>
-                  <p>{currentError.message}</p>
+      <FlipbookStoreContext.Provider value={storeValue}>
+        <PageRegistryWriteContext.Provider value={pageRegistry.write}>
+          <PageRegistryReadContext.Provider value={pageRegistry.read}>
+            <div
+              ref={containerRef}
+              className="fbjs-container"
+              role="region"
+              aria-label="Document viewer"
+              tabIndex={0}
+            >
+              {currentError && (
+                renderError?.(currentError) ?? (
+                  <div role="alert" className="fbjs-error">
+                    <p>Unable to load document</p>
+                    <p>{currentError.message}</p>
+                  </div>
+                )
+              )}
+              {!showContent && !currentError && (
+                renderLoading?.() ?? <LoadingState />
+              )}
+              {showContent && (
+                <div
+                  ref={stageRef}
+                  data-testid="fbjs-ready"
+                  className="fbjs-stage"
+                  data-overflowing={isOverflowing ? 'true' : undefined}
+                >
+                  <ErrorBoundary>
+                    <SpreadRenderer />
+                    <AriaAnnouncer />
+                    {showCurlOverlay && (
+                      <CurlChunkErrorBoundary>
+                        <Suspense fallback={null}>
+                          <LazyCurlOverlay stageRef={stageRef} />
+                        </Suspense>
+                      </CurlChunkErrorBoundary>
+                    )}
+                  </ErrorBoundary>
                 </div>
-              )
-            )}
-            {!showContent && !currentError && (
-              renderLoading?.() ?? <LoadingState />
-            )}
-            {showContent && (
-              <div
-                ref={stageRef}
-                data-testid="fbjs-ready"
-                className="fbjs-stage"
-                data-overflowing={isOverflowing ? 'true' : undefined}
-              >
-                <ErrorBoundary>
-                  <SpreadRenderer />
-                  <AriaAnnouncer />
-                  {showCurlOverlay && (
-                    <CurlChunkErrorBoundary>
-                      <Suspense fallback={null}>
-                        <LazyCurlOverlay stageRef={stageRef} />
-                      </Suspense>
-                    </CurlChunkErrorBoundary>
-                  )}
-                </ErrorBoundary>
-              </div>
-            )}
-          </div>
-        </PageRegistryReadContext.Provider>
-      </PageRegistryWriteContext.Provider>
+              )}
+            </div>
+            {children}
+          </PageRegistryReadContext.Provider>
+        </PageRegistryWriteContext.Provider>
+      </FlipbookStoreContext.Provider>
     </FlipbookContext.Provider>
   );
 }

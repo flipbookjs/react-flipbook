@@ -33,7 +33,7 @@ function buildContext(opts: { pageCount?: number; currentSpreadIndex?: number; r
   };
   const spreads = computeSpreads(pageCount, resolvedViewMode);
   state.spreadCount = spreads.length;
-  return { state, dispatch: vi.fn(), source, spreads, effectiveScale: 1, isOverflowing: false, registerCurlWheelHandler: vi.fn() };
+  return { state, dispatch: vi.fn(), source, spreads, effectiveScale: 1, isOverflowing: false, registerCurlWheelHandler: vi.fn(), sourceStatus: 'ready', sourceError: null };
 }
 
 function makePageEntry(left: number): { canvas: HTMLCanvasElement; element: HTMLDivElement } {

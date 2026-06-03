@@ -69,6 +69,11 @@ function makeState(overrides: Partial<FlipbookState> = {}): FlipbookState {
     containerHeight: 768,
     zoomMode: 'fit-page',
     customScale: 1,
+    isFullScreen: false,
+    theme: 'light',
+    interactionMode: 'select',
+    isPrinting: false,
+    printError: null,
     ...overrides,
   };
 }

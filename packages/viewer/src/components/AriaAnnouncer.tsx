@@ -1,7 +1,7 @@
-import { useFlipbook } from '../core/FlipbookContext';
+import { useFlipbookContext } from '../core/FlipbookContext';
 
 export function AriaAnnouncer() {
-  const { state, spreads } = useFlipbook();
+  const { state, spreads } = useFlipbookContext();
   const spread = spreads[state.currentSpreadIndex];
 
   let announcement: string;

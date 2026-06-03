@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useContext, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from 'react';
-import { useFlipbook } from '../core/FlipbookContext';
+import { useFlipbookContext } from '../core/FlipbookContext';
 import { PageRegistryReadContext } from '../core/PageRegistry';
 import { deriveSpreadGeometry } from './spreadGeometry';
 import { useCurlMode } from './useCurlMode';
@@ -28,7 +28,7 @@ interface CurlOverlayProps {
  *   4. useCurlRenderCallback — per-frame paint (receives all upstream values)
  */
 function CurlOverlay({ stageRef }: CurlOverlayProps) {
-  const { state, spreads } = useFlipbook();
+  const { state, spreads } = useFlipbookContext();
   const { resolvedViewMode, currentSpreadIndex } = state;
 
   // PageRegistry read context. Caller guarantees presence; explicit error if absent.

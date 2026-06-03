@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { type Point, type PageRect, calcCurl, type CurlResult } from './CurlCalculation';
 import { curlAssert } from './types';
-import { useFlipbook } from '../core/FlipbookContext';
+import { useFlipbookContext } from '../core/FlipbookContext';
 import type { FlipbookState } from '../core/flipbookReducer';
 import type { PageSource } from '../types/PageSource';
 
@@ -92,7 +92,7 @@ export const useCurlAnimation = (
   params: UseCurlAnimationParams,
 ): UseCurlAnimationReturn => {
   const cfg = DEFAULT_CONFIG;
-  const { state, dispatch, source } = useFlipbook();
+  const { state, dispatch, source } = useFlipbookContext();
 
   // PageRect synced from params each render (replaces old fork's pageRect parameter).
   const pageRectRef = useRef<PageRect>({ width: params.pageWidth, height: params.pageHeight });

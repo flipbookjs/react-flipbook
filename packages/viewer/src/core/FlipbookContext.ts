@@ -19,12 +19,31 @@ export interface FlipbookContextValue {
   registerCurlWheelHandler: (
     handler: ((direction: 'next' | 'previous') => void) | null,
   ) => void;
+  // ---- Step 6A additions (Decision 1 of step-6-architectural-plan.md) ----
+  /** Mirrors `usePageSource.SourceState.status`. The public `useFlipbook` hook
+   *  maps this to the top-level `status` field of the discriminated `FlipbookHook`.
+   *  No corresponding reducer field — source lifecycle isn't reducer-managed. */
+  sourceStatus: 'loading' | 'ready' | 'error';
+  /** Populated when sourceStatus === 'error'; null otherwise. Mirrors
+   *  `usePageSource.SourceState.error`. */
+  sourceError: Error | null;
 }
 
 export const FlipbookContext = createContext<FlipbookContextValue | null>(null);
 
-export function useFlipbook(): FlipbookContextValue {
+/**
+ * Internal hook returning the raw FlipbookContextValue. NOT re-exported from
+ * src/index.ts. Public consumers should use the curated `useFlipbook` from
+ * src/hooks/useFlipbook.ts instead — that hook returns a discriminated-union
+ * shape with stable references and no internal-context fields like
+ * `registerCurlWheelHandler`.
+ *
+ * Renamed from `useFlipbook` in 6A so the public-hook name is freed.
+ * Internal call sites: useCurlMode, CurlOverlay, useCurlAnimation,
+ * AriaAnnouncer, SpreadRenderer.
+ */
+export function useFlipbookContext(): FlipbookContextValue {
   const ctx = useContext(FlipbookContext);
-  if (ctx === null) throw new Error('useFlipbook must be used within FlipbookProvider');
+  if (ctx === null) throw new Error('useFlipbookContext must be used within FlipbookProvider');
   return ctx;
 }

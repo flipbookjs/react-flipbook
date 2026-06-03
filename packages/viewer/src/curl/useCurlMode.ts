@@ -1,7 +1,7 @@
 // No 'use client' directive — propagates from CurlOverlay.tsx (the boundary) per Decision 19.
 
 import { useEffect, useMemo, useRef, type RefObject } from 'react';
-import { useFlipbook } from '../core/FlipbookContext';
+import { useFlipbookContext } from '../core/FlipbookContext';
 import { useCurlAnimation, type CurlAnimationSnapshot, type CurlAnimationActions } from './useCurlAnimation';
 import { usePageCurlGesture } from './usePageCurlGesture';
 import { decideCurlWheelDispatch } from './wheelDecision';
@@ -38,7 +38,7 @@ export interface UseCurlModeReturn {
 
 export const useCurlMode = (params: UseCurlModeParams): UseCurlModeReturn => {
   const { enabled, stageRef, overlayRef, overlayRect, spreadGeometry, registryRead, registryVersion } = params;
-  const { state, source, effectiveScale, registerCurlWheelHandler } = useFlipbook();
+  const { state, source, effectiveScale, registerCurlWheelHandler } = useFlipbookContext();
   const { resolvedViewMode, pageCount } = state;
 
   // --- Page dimensions (CSS pixels at current scale) ---
