@@ -1,3 +1,11 @@
+import '@testing-library/jest-dom/vitest';
+import { cleanup } from '@testing-library/react';
+import { afterEach } from 'vitest';
+
+afterEach(() => {
+  cleanup();
+});
+
 // Polyfills required for pdfjs-dist and PageRenderer in Node/jsdom (Week 0 findings)
 
 // jsdom doesn't implement matchMedia — PageRenderer uses it for mobile DPR cap

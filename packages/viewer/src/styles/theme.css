@@ -1,0 +1,82 @@
+/*
+ * Public CSS custom-property surface for theming. The `--fbjs-*` variable
+ * names are part of the v0.1 public API (parent plan Public API contract
+ * table — "CSS custom properties"). Renaming any variable is a major change.
+ *
+ * Light theme is the default (applies to .fbjs-root with no data-theme
+ * attribute OR with data-theme="light"). Dark theme via [data-theme="dark"].
+ * The dual selectors (descendant + self) let consumers put data-theme on
+ * either the root container OR a wrapping ancestor (e.g., <body>).
+ *
+ * Consumer override patterns:
+ *   - Global re-skin: declare `--fbjs-accent: hotpink` in your app's CSS
+ *     under any ancestor of `.fbjs-root` — cascades into the viewer.
+ *   - Per-instance re-skin: target a specific `.fbjs-root` via id or class.
+ *   - Whole-theme swap: provide your own `[data-theme="my-brand"]` rules.
+ *
+ * Cascade layer: all library rules live in the `flipbook` layer. Consumer
+ * rules outside any layer win against layered rules regardless of
+ * specificity. So a consumer's plain `.fbjs-toolbar__button { color: red; }`
+ * overrides the library's button color without needing !important or
+ * higher-specificity selectors. This lets utility-first CSS (Tailwind, etc.)
+ * coexist with the library's chrome cleanly. Browsers without @layer
+ * support (pre-2022 evergreen) treat the rules as if unlayered — same
+ * functional outcome as today, just without the override ergonomics for
+ * those consumers.
+ */
+
+@layer flipbook {
+
+.fbjs-root {
+  --fbjs-bg: #ffffff;
+  --fbjs-fg: #1f2937;
+  --fbjs-fg-muted: #9ca3af;        /* lighter gray for de-emphasized text/icons */
+  --fbjs-accent: #6366f1;
+  --fbjs-toolbar-bg: #ffffff;
+  --fbjs-toolbar-fg: #1f2937;
+  --fbjs-toolbar-fg-muted: #9ca3af; /* CMS-aligned icon stroke color — lighter than toolbar-fg so icons read as chrome, not content */
+  --fbjs-toolbar-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+  --fbjs-border: #e5e7eb;
+  --fbjs-overlay-bg: rgba(255, 255, 255, 0.95);
+}
+
+.fbjs-root[data-theme='light'],
+[data-theme='light'] .fbjs-root {
+  --fbjs-bg: #ffffff;
+  --fbjs-fg: #1f2937;
+  --fbjs-fg-muted: #9ca3af;
+  --fbjs-accent: #6366f1;
+  --fbjs-toolbar-bg: #ffffff;
+  --fbjs-toolbar-fg: #1f2937;
+  --fbjs-toolbar-fg-muted: #9ca3af;
+  --fbjs-toolbar-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+  --fbjs-border: #e5e7eb;
+  --fbjs-overlay-bg: rgba(255, 255, 255, 0.95);
+}
+
+.fbjs-root[data-theme='dark'],
+[data-theme='dark'] .fbjs-root {
+  --fbjs-bg: #0f172a;
+  --fbjs-fg: #f8fafc;
+  --fbjs-fg-muted: #64748b;
+  --fbjs-accent: #818cf8;
+  --fbjs-toolbar-bg: #1e293b;
+  --fbjs-toolbar-fg: #f8fafc;
+  --fbjs-toolbar-fg-muted: #94a3b8;
+  --fbjs-toolbar-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
+  --fbjs-border: #334155;
+  --fbjs-overlay-bg: rgba(15, 23, 42, 0.95);
+}
+
+/*
+ * Focus-visible outline using the accent color. Applies broadly to
+ * `:focus-visible` inside the viewer — toolbar buttons, the container itself,
+ * future thumbnail buttons, etc. Browsers that don't support :focus-visible
+ * fall back to their native outline.
+ */
+.fbjs-root :focus-visible {
+  outline: 2px solid var(--fbjs-accent);
+  outline-offset: 2px;
+}
+
+} /* end @layer flipbook */
