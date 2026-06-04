@@ -35,7 +35,6 @@
     "react-dom": ">=18.0.0"
   },
   "devDependencies": {
-    "@types/use-sync-external-store": "^1.5.0",
     "pdfjs-dist": "^5.6.205"
   },
   "keywords": [
@@ -51,7 +50,5 @@
     "type": "git",
     "url": "https://github.com/flipbookjs/react-flipbook"
   },
-  "dependencies": {
-    "use-sync-external-store": "^1.4.0"
-  }
+  "dependencies": {}
 }

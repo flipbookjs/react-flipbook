@@ -1,5 +1,5 @@
 import { useContext, useMemo } from 'react';
-import { useSyncExternalStoreWithSelector } from 'use-sync-external-store/shim/with-selector';
+import { useSyncExternalStoreWithSelector } from './useSyncExternalStoreWithSelector';
 import { FlipbookStoreContext } from '../core/FlipbookStoreContext';
 import type { PageSource } from '../types/PageSource';
 import type { DefaultScale } from '../zoom/types';
