@@ -38,6 +38,31 @@
   --fbjs-toolbar-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
   --fbjs-border: #e5e7eb;
   --fbjs-overlay-bg: rgba(255, 255, 255, 0.95);
+
+  /* Layout — flex column so optional top/bottom toolbar slots stack above
+     and below `.fbjs-container`. Pass-through sizing: the consumer's wrapper
+     sizes us; we size our descendants. */
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  /* Containing block for `position: absolute` descendants (`.fbjs-stage`,
+     `.fbjs-page-loading`, curl overlay). Without this they escape to the
+     nearest positioned ancestor in consumer code — unpredictable. */
+  position: relative;
+  /* Consumer-applied padding on `.fbjs-root` should not blow past the
+     100% × 100% box. */
+  box-sizing: border-box;
+  /* New stacking context — the curl overlay uses z-index; isolating prevents
+     it from colliding with consumer z-indexes (sticky headers, modal
+     backdrops, CMS chrome). */
+  isolation: isolate;
+  /* Actually consume the theme tokens. Before this, light/dark only swapped
+     the variable values; the root never USED them, so dark theme produced
+     dark toolbar variables (consumed by `.fbjs-toolbar`) but a white viewer
+     background. */
+  background-color: var(--fbjs-bg);
+  color: var(--fbjs-fg);
 }
 
 .fbjs-root[data-theme='light'],
