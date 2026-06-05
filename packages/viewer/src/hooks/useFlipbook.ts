@@ -30,6 +30,7 @@ export interface FlipbookHookState {
   interactionMode: 'select' | 'pan';
   isPrinting: boolean;
   printError: { type: 'too-large'; totalPages: number; limit: number } | null;
+  thumbnailsOpen: boolean;
 }
 
 export interface FlipbookHookActions {
@@ -51,6 +52,8 @@ export interface FlipbookHookActions {
   setInteractionMode: (mode: 'select' | 'pan') => void;
   print: () => Promise<void>;
   download: () => void;
+  setThumbnailsOpen: (open: boolean) => void;
+  toggleThumbnails: () => void;
 }
 
 export interface FlipbookHookHelpers {
@@ -183,6 +186,7 @@ export const SSR_STATE: FlipbookHookState = Object.freeze({
   zoomMode: 'fit-page', customScale: 1, effectiveScale: 1, isOverflowing: false,
   isFullScreen: false, theme: 'light', interactionMode: 'select', isPrinting: false,
   printError: null,
+  thumbnailsOpen: false,
 }) as FlipbookHookState;
 
 /** No-op action object — used by SSR_HOOK and SSR_SNAPSHOT. Frozen; identity
@@ -197,6 +201,8 @@ export const SSR_ACTIONS: FlipbookHookActions = Object.freeze({
   setInteractionMode: () => {},
   print: () => Promise.resolve(),
   download: () => {},
+  setThumbnailsOpen: () => {},
+  toggleThumbnails: () => {},
 }) as FlipbookHookActions;
 
 /** Default helpers — all-false / always-(-1) — used by SSR_HOOK and SSR_SNAPSHOT. */

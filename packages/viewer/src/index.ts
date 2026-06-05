@@ -10,6 +10,9 @@ export type { FlipbookProps } from './Flipbook';
 export { Toolbar } from './toolbar/Toolbar';
 export type { ToolbarProps } from './toolbar/Toolbar';
 
+// Thumbnail panel (Step 6D)
+export { ThumbnailPanel } from './thumbnails/ThumbnailPanel';
+
 // PageSource interface
 export type {
   PageSource,

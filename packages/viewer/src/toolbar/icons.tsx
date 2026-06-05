@@ -92,11 +92,16 @@ export function ArrowsPointingInIcon(props: IconProps) {
   );
 }
 
-// NOTE: `Squares2x2Icon` (the thumbnails-grid icon for ThumbnailsToggleButton)
-// is intentionally NOT shipped in 6B — that button is deferred to 6D per the
-// status-header deviation. 6D adds the icon alongside the button + reducer
-// state + action. Including it here as dead code would violate "no scope creep"
-// (Rule 5) — the icon-inventory-stability argument was weak.
+export function ThumbnailsToggleIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="3" y="14" width="7" height="7" rx="1" />
+      <rect x="14" y="14" width="7" height="7" rx="1" />
+    </Icon>
+  );
+}
 
 export function PrinterIcon(props: IconProps) {
   return (

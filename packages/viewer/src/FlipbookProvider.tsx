@@ -78,6 +78,17 @@ interface FlipbookProviderProps {
   toolbarTopNode?: ReactNode | null;
   /** Bottom-bar node rendered below the container inside `.fbjs-root`. */
   toolbarBottomNode?: ReactNode | null;
+  /** Thumbnail panel node rendered between `.fbjs-container` and the
+   *  bottom toolbar inside `.fbjs-root`. Computed by `<Flipbook>` —
+   *  always `<ThumbnailPanel />` (wrapped in `<ErrorBoundary>`) regardless
+   *  of `showThumbnails`. The panel's outer shell stays mounted across
+   *  open/close cycles so the CSS slide animation has a stable in-DOM
+   *  element to transition; toggles its `data-open` attribute based on
+   *  `state.thumbnailsOpen`; only the inner content (scroll container +
+   *  buttons + canvases) mounts when actually open. Pass `null` only for
+   *  low-level/test consumption of `<FlipbookProvider>` that wants no
+   *  panel slot at all. */
+  thumbnailsNode?: ReactNode | null;
   /** Optional test/integration children mounted inside the full context
    *  stack (Flipbook + Store + PageRegistry) but OUTSIDE the visible
    *  `.fbjs-container` div, so they have access to all the public hooks
@@ -101,6 +112,7 @@ export function FlipbookProvider({
   onThemeChange,
   toolbarTopNode = null,
   toolbarBottomNode = null,
+  thumbnailsNode = null,
   children,
 }: FlipbookProviderProps) {
   // 1. Reducer
@@ -121,6 +133,11 @@ export function FlipbookProvider({
   useIsomorphicLayoutEffect(() => {
     themeRef.current = state.theme;
   }, [state.theme]);
+
+  const thumbnailsOpenRef = useRef(state.thumbnailsOpen);
+  useIsomorphicLayoutEffect(() => {
+    thumbnailsOpenRef.current = state.thumbnailsOpen;
+  }, [state.thumbnailsOpen]);
 
   // Dev-mode warning when defaultScale changes after mount. The prop is
   // uncontrolled by design (initial-state factory only; consumer must remount
@@ -529,6 +546,12 @@ export function FlipbookProvider({
     dispatch({ type: 'SET_THEME', value: next });
     onThemeChangeRef.current?.(next);
   }, [dispatch]);
+  const setThumbnailsOpen = useCallback((open: boolean) => {
+    dispatch({ type: 'SET_THUMBNAILS_OPEN', value: open });
+  }, [dispatch]);
+  const toggleThumbnails = useCallback(() => {
+    dispatch({ type: 'SET_THUMBNAILS_OPEN', value: !thumbnailsOpenRef.current });
+  }, [dispatch]);
   const setInteractionMode = useCallback((_mode: 'select' | 'pan') => {},          []); // 6E
 
   // Source-bound stubs — rotate on source change (per Decision 1 contract).
@@ -545,6 +568,7 @@ export function FlipbookProvider({
     zoomIn, zoomOut, setZoom, fitPage, fitWidth,
     enterFullScreen, exitFullScreen, toggleFullScreen,
     setTheme, toggleTheme,
+    setThumbnailsOpen, toggleThumbnails,
     setInteractionMode,
     print, download,
   }), [
@@ -552,6 +576,7 @@ export function FlipbookProvider({
     zoomIn, zoomOut, setZoom, fitPage, fitWidth,
     enterFullScreen, exitFullScreen, toggleFullScreen,
     setTheme, toggleTheme,
+    setThumbnailsOpen, toggleThumbnails,
     setInteractionMode,
     print, download,
   ]);
@@ -612,12 +637,14 @@ export function FlipbookProvider({
       interactionMode: state.interactionMode,
       isPrinting: state.isPrinting,
       printError: state.printError,
+      thumbnailsOpen: state.thumbnailsOpen,
     };
   }, [
     spreads, state.currentSpreadIndex, state.pageCount, state.spreadCount,
     state.viewMode, state.resolvedViewMode, state.zoomMode, state.customScale,
     effectiveScale, isOverflowing,
     state.isFullScreen, state.theme, state.interactionMode, state.isPrinting, state.printError,
+    state.thumbnailsOpen,
   ]);
 
   // ---- Snapshot store (commit-only) ----
@@ -754,6 +781,7 @@ export function FlipbookProvider({
                   </div>
                 )}
               </div>
+              {thumbnailsNode}
               {toolbarBottomNode}
             </div>
             {children}

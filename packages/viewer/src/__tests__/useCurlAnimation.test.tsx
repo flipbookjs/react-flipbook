@@ -43,6 +43,7 @@ const baseState: FlipbookState = {
   interactionMode: 'select',
   isPrinting: false,
   printError: null,
+  thumbnailsOpen: false,
 };
 
 function makeCtxValue(stateOverride: Partial<FlipbookState> = {}, dispatch = vi.fn()): FlipbookContextValue {

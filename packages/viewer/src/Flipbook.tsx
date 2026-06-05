@@ -6,6 +6,8 @@ import type { DefaultScale } from './zoom/types';
 import { PdfjsSource } from './adapters/PdfjsSource';
 import { FlipbookProvider } from './FlipbookProvider';
 import { Toolbar } from './toolbar/Toolbar';
+import { ThumbnailPanel } from './thumbnails/ThumbnailPanel';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import type { VisibilityProps } from './toolbar/resolveToolbarVisibility';
 
 /**
@@ -96,6 +98,7 @@ export function Flipbook({
   showSelectionMode,
   showZoom,
   showNavigation,
+  showThumbnails,
 }: FlipbookProps) {
   const internalSource = useMemo(
     () => (url ? new PdfjsSource(url) : null),
@@ -135,7 +138,8 @@ export function Flipbook({
       showFullScreen !== undefined ||
       showSelectionMode !== undefined ||
       showZoom !== undefined ||
-      showNavigation !== undefined
+      showNavigation !== undefined ||
+      showThumbnails !== undefined
     );
     if (isCustomToolbar && hasBuiltInOnlyProps) {
       if (!warnedRef.current) {
@@ -174,6 +178,7 @@ export function Flipbook({
         showSelectionMode={showSelectionMode}
         showZoom={showZoom}
         showNavigation={showNavigation}
+        showThumbnails={showThumbnails}
       />
     );
     toolbarBottomNode = (
@@ -187,6 +192,7 @@ export function Flipbook({
         showSelectionMode={showSelectionMode}
         showZoom={showZoom}
         showNavigation={showNavigation}
+        showThumbnails={showThumbnails}
       />
     );
   } else if (isSlotObject(toolbar)) {
@@ -195,6 +201,27 @@ export function Flipbook({
   } else {
     toolbarBottomNode = toolbar;   // single ReactNode → bottom slot only
   }
+
+  // thumbnailsNode is ALWAYS wired — independent of `showThumbnails`.
+  // Button-only semantic (matching other `show*` props): `showThumbnails={false}`
+  // hides the bottom-bar TOGGLE BUTTON; the panel slot is always present so
+  // custom UI can open the panel via `actions.toggleThumbnails()`. The panel
+  // itself reads `state.thumbnailsOpen` and renders empty when closed
+  // (slide-animation contract — outer shell stays mounted).
+  //
+  // Isolate the panel inside its own ErrorBoundary so a thumbnail-side
+  // failure (e.g., `source.getPageSize(idx)` throwing on a malformed page,
+  // an IntersectionObserver edge case, a renderPage promise rejecting in
+  // a way the panel's catch doesn't anticipate) cannot crash the entire
+  // `<Flipbook>` tree and take the main reading surface down with it.
+  // `fallback={() => null}` means a crashed panel silently disappears —
+  // toolbar + document remain functional. The function form is required:
+  // `ErrorBoundary`'s `fallback` prop is typed `(error: Error) => ReactNode`.
+  const thumbnailsNode: ReactNode = (
+    <ErrorBoundary fallback={() => null}>
+      <ThumbnailPanel />
+    </ErrorBoundary>
+  );
 
   return (
     <FlipbookProvider
@@ -209,6 +236,7 @@ export function Flipbook({
       onThemeChange={onThemeChange}
       toolbarTopNode={toolbarTopNode}
       toolbarBottomNode={toolbarBottomNode}
+      thumbnailsNode={thumbnailsNode}
     />
   );
 }

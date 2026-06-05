@@ -10,6 +10,7 @@ import { PrintButton } from './buttons/PrintButton';
 import { DownloadButton } from './buttons/DownloadButton';
 import { SelectionModeButton } from './buttons/SelectionModeButton';
 import { ThemeToggleButton } from './buttons/ThemeToggleButton';
+import { ThumbnailsToggleButton } from './buttons/ThumbnailsToggleButton';
 import { PageReadout } from './readouts/PageReadout';
 import { ZoomReadout } from './readouts/ZoomReadout';
 import {
@@ -124,7 +125,7 @@ export const Toolbar = memo(function Toolbar({
     );
   }
 
-  // Bottom bar — navigation + zoom + selection-mode + theme-toggle.
+  // Bottom bar — navigation + zoom + thumbnails + selection-mode + theme-toggle.
   return (
     <ToolbarShell aria-label={LABELS.toolbarBottomBarLabel} className="fbjs-toolbar__bar--bottom">
       {visibility.showNavigation && (
@@ -147,6 +148,7 @@ export const Toolbar = memo(function Toolbar({
       )}
       <div className="fbjs-toolbar__section fbjs-toolbar__section--right">
         <div className="fbjs-toolbar__group">
+          {visibility.showThumbnails && <ThumbnailsToggleButton />}
           {visibility.showSelectionMode && <SelectionModeButton />}
           <ThemeToggleButton />
         </div>

@@ -36,4 +36,7 @@ export const LABELS = {
   download: 'Download',
   selectionModeToggle: 'Toggle pan mode',     // aria-pressed=true → pan; false → selection
   themeToggle: 'Toggle dark theme',           // aria-pressed=true → dark; false → light
+  thumbnailPanelLabel: 'Page thumbnails',
+  thumbnailsToggle: 'Toggle thumbnails',
+  thumbnailButton: (pageNumber: number, totalPages: number) => `Go to page ${pageNumber} of ${totalPages}`,
 } as const;

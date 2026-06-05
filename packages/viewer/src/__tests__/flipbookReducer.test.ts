@@ -74,6 +74,7 @@ function makeState(overrides: Partial<FlipbookState> = {}): FlipbookState {
     interactionMode: 'select',
     isPrinting: false,
     printError: null,
+    thumbnailsOpen: false,
     ...overrides,
   };
 }

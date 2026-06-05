@@ -75,3 +75,21 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
     }
   } as any;
 }
+
+if (typeof globalThis.IntersectionObserver === 'undefined') {
+  globalThis.IntersectionObserver = class IntersectionObserver {
+    constructor(_callback: IntersectionObserverCallback, _options?: IntersectionObserverInit) {
+      // No-op default. Tests that need to drive intersection state
+      // (the useThumbnailVirtualization tests) override
+      // `globalThis.IntersectionObserver` per-file with a controllable
+      // mock, saving + restoring this polyfill in beforeEach/afterEach.
+    }
+    observe(_target: Element) {}
+    unobserve(_target: Element) {}
+    disconnect() {}
+    takeRecords(): IntersectionObserverEntry[] { return []; }
+    readonly root = null;
+    readonly rootMargin = '';
+    readonly thresholds: ReadonlyArray<number> = [];
+  } as unknown as typeof IntersectionObserver;
+}

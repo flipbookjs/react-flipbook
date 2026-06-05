@@ -1,5 +1,6 @@
 @import './theme.css';
 @import './toolbar.css';
+@import './thumbnails.css';
 
 .fbjs-container {
   position: relative;

@@ -22,6 +22,8 @@
  *   when the curl-mode flag lands; 6C ships the true default)
  * - `showZoom`: true
  * - `showNavigation`: true
+ * - `showThumbnails`: true (not capability-gated; every PageSource
+ *   implements `getPageSize` + `renderPage`)
  *
  * Used by `<Toolbar>` after a `useFlipbookSelector` reads the slice via a
  * shallowly-compared object selector.
@@ -34,6 +36,7 @@ export interface VisibilityProps {
   showSelectionMode?: boolean;
   showZoom?: boolean;
   showNavigation?: boolean;
+  showThumbnails?: boolean;
 }
 
 export interface VisibilitySlice {
@@ -48,6 +51,7 @@ export interface ResolvedVisibility {
   showSelectionMode: boolean;
   showZoom: boolean;
   showNavigation: boolean;
+  showThumbnails: boolean;
 }
 
 export function resolveToolbarVisibility(
@@ -61,5 +65,6 @@ export function resolveToolbarVisibility(
     showSelectionMode: props.showSelectionMode ?? true,
     showZoom:          props.showZoom          ?? true,
     showNavigation:    props.showNavigation    ?? true,
+    showThumbnails:    props.showThumbnails    ?? true,
   };
 }

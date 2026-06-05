@@ -37,10 +37,12 @@ const EXPECTED_RUNTIME_EXPORTS = [
   'DownloadButton',
   'SelectionModeButton',
   'ThemeToggleButton',
+  'ThumbnailsToggleButton',
   'PageReadout',
   'ZoomReadout',
   'LABELS',
   'Toolbar',
+  'ThumbnailPanel',
 ].sort();
 
 describe('toolbar-parts sub-path public API', () => {

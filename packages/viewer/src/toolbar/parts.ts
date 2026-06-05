@@ -11,7 +11,7 @@ export { ToolbarShellContext } from './ToolbarShellContext';
 export type { FocusableElement, ToolbarShellContextValue } from './ToolbarShellContext';
 export type { UseToolbarPartReturn } from './useToolbarPart';
 
-// Buttons (9).
+// Buttons (10).
 export { PrevButton } from './buttons/PrevButton';
 export { NextButton } from './buttons/NextButton';
 export { ZoomInButton } from './buttons/ZoomInButton';
@@ -21,6 +21,7 @@ export { PrintButton } from './buttons/PrintButton';
 export { DownloadButton } from './buttons/DownloadButton';
 export { SelectionModeButton } from './buttons/SelectionModeButton';
 export { ThemeToggleButton } from './buttons/ThemeToggleButton';
+export { ThumbnailsToggleButton } from './buttons/ThumbnailsToggleButton';
 
 // Readouts (2).
 export { PageReadout } from './readouts/PageReadout';
@@ -32,3 +33,6 @@ export { LABELS } from './labels';
 // Built-in wrapper (Step 6C).
 export { Toolbar } from './Toolbar';
 export type { ToolbarProps } from './Toolbar';
+
+// Thumbnail panel (Step 6D — also available via main entry).
+export { ThumbnailPanel } from '../thumbnails/ThumbnailPanel';

@@ -30,6 +30,7 @@ const EXPECTED_RUNTIME_EXPORTS = [
   'Flipbook',
   'PdfjsSource',
   'SpecialZoomLevel',
+  'ThumbnailPanel',
   'Toolbar',
   'configurePdfWorker',
 ].sort();

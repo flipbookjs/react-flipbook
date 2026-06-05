@@ -186,6 +186,8 @@ describe('useFlipbook() — action stability across url change', () => {
     expect(b.setTheme).toBe(a.setTheme);
     expect(b.toggleTheme).toBe(a.toggleTheme);
     expect(b.setInteractionMode).toBe(a.setInteractionMode);
+    expect(b.setThumbnailsOpen).toBe(a.setThumbnailsOpen);
+    expect(b.toggleThumbnails).toBe(a.toggleThumbnails);
 
     // Source-bound: ROTATED — print/download close over `source` per Decision 1.
     expect(b.print).not.toBe(a.print);

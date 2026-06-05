@@ -38,6 +38,12 @@ export interface FlipbookState {
    *  `printErrorDismissMs` timer (effect-owned in 6F), or SOURCE_CHANGED.
    *  6F dispatches SET_PRINT_ERROR / CLEAR_PRINT_ERROR. */
   printError: { type: 'too-large'; totalPages: number; limit: number } | null;
+  // ---- Step 6D additions ----
+  /** Whether the built-in thumbnail panel is open. Toggled via
+   *  `actions.setThumbnailsOpen` / `actions.toggleThumbnails`.
+   *  Reset on SOURCE_CHANGED: KEPT (preserved across document changes;
+   *  matches `theme` / `interactionMode`). */
+  thumbnailsOpen: boolean;
 }
 
 export type FlipbookAction =
@@ -54,7 +60,9 @@ export type FlipbookAction =
   | { type: 'SET_INTERACTION_MODE'; value: 'select' | 'pan' }
   | { type: 'SET_PRINTING'; value: boolean }
   | { type: 'SET_PRINT_ERROR'; payload: { type: 'too-large'; totalPages: number; limit: number } }
-  | { type: 'CLEAR_PRINT_ERROR' };
+  | { type: 'CLEAR_PRINT_ERROR' }
+  // ---- Step 6D additions ----
+  | { type: 'SET_THUMBNAILS_OPEN'; value: boolean };
 
 export function clampSpreadIndex(index: number, spreadCount: number): number {
   if (spreadCount <= 0) return 0;
@@ -139,6 +147,8 @@ export function createInitialState(
     interactionMode: 'select',
     isPrinting: false,
     printError: null,
+    // ---- Step 6D additions ----
+    thumbnailsOpen: false,
   };
 }
 
@@ -262,6 +272,10 @@ export function flipbookReducer(state: FlipbookState, action: FlipbookAction): F
     case 'SET_THEME':
       if (state.theme === action.value) return state;
       return { ...state, theme: action.value };
+
+    case 'SET_THUMBNAILS_OPEN':
+      if (state.thumbnailsOpen === action.value) return state;
+      return { ...state, thumbnailsOpen: action.value };
 
     case 'SET_INTERACTION_MODE':
       if (state.interactionMode === action.value) return state;
