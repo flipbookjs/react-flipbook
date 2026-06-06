@@ -1,6 +1,7 @@
 @import './theme.css';
 @import './toolbar.css';
 @import './thumbnails.css';
+@import './interactionMode.css';
 
 .fbjs-container {
   position: relative;
@@ -14,10 +15,14 @@
   min-height: 0;
   display: flex;
   align-items: center;
-  justify-content: center;
-  /* Decision 9: native scroll when scaled content exceeds container.
-     Pairs with .fbjs-stage min-content + margin:auto below — together
-     they form the canonical flex+overflow fix (browser-supported across
+  /* Decision 9 (revised): native scroll when scaled content exceeds container.
+     Pairs with .fbjs-stage min-content + margin:auto below. NOTE: do NOT add
+     `justify-content: center` here — flex centering plus margin:auto compute
+     scrollWidth from only the right half of the centered overflow, leaving
+     the left half unreachable via any scroll mechanism (wheel, scrollbar,
+     pan). Rely entirely on `.fbjs-stage { margin: auto }` for horizontal
+     centering: it centers when content fits AND lets scroll-bars reach
+     (0,0) when it doesn't — the canonical fix (browser-supported across
      Chrome/Firefox/Edge 90+, Safari 15.4+). */
   overflow: auto;
 }

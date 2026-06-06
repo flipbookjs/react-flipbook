@@ -6,6 +6,7 @@ import { mergeRefs } from '../mergeRefs';
 import { ArrowsPointingOutIcon, ArrowsPointingInIcon } from '../icons';
 import { LABELS } from '../labels';
 import { devWarn } from '../../core/devWarn';
+import { useFlipbookRefs } from '../../core/FlipbookRefsContext';
 
 /**
  * `actions.toggleFullScreen` is a stub in 6A (returns Promise.resolve()) until
@@ -47,6 +48,7 @@ export const FullScreenButton = memo(forwardRef<HTMLButtonElement,
 >(function FullScreenButton(props, forwardedRef) {
   const { ref: internalRef, tabIndex, onFocus, onKeyDown } = useToolbarPart<HTMLButtonElement>();
   const actions = useFlipbookActions();
+  const { lastFocusedFullScreenButtonRef } = useFlipbookRefs();
   const { isFullScreen, canFullScreen, ready } = useFlipbookSelector(
     (s) => ({
       isFullScreen: s.state.isFullScreen,
@@ -67,6 +69,9 @@ export const FullScreenButton = memo(forwardRef<HTMLButtonElement,
   const composedClassName = ['fbjs-toolbar__button', className].filter(Boolean).join(' ');
   const handleClick = composeHandlers((e) => {
     if (isDisabled) { e.preventDefault(); return; }
+    if (internalRef.current !== null) {
+      lastFocusedFullScreenButtonRef.current = internalRef.current;
+    }
     actions.toggleFullScreen().catch((err) => {
       devWarn('[flipbook] toolbar: toggleFullScreen() rejected; ignoring.', err);
     });

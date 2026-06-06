@@ -84,6 +84,7 @@ export const Toolbar = memo(function Toolbar({
   compact = false,
   title,
   position = 'bottom',
+  enablePageCurl,
   ...visibilityProps
 }: ToolbarPropsInternal) {
   const isMounted = useIsMounted();
@@ -91,12 +92,13 @@ export const Toolbar = memo(function Toolbar({
     (s) => ({
       canDownload: s.helpers.canDownload,
       canFullScreen: s.helpers.canFullScreen,
+      isOverflowing: s.state.isOverflowing,
     }),
     shallowEqual,
   );
 
   const visibility = useMemo(
-    () => resolveToolbarVisibility(visibilityProps, slice),
+    () => resolveToolbarVisibility({ ...visibilityProps, enablePageCurl }, slice),
     [
       visibilityProps.showPrint,
       visibilityProps.showDownload,
@@ -104,6 +106,7 @@ export const Toolbar = memo(function Toolbar({
       visibilityProps.showSelectionMode,
       visibilityProps.showZoom,
       visibilityProps.showNavigation,
+      enablePageCurl,
       slice,
     ],
   );
@@ -149,7 +152,9 @@ export const Toolbar = memo(function Toolbar({
       <div className="fbjs-toolbar__section fbjs-toolbar__section--right">
         <div className="fbjs-toolbar__group">
           {visibility.showThumbnails && <ThumbnailsToggleButton />}
-          {visibility.showSelectionMode && <SelectionModeButton />}
+          {visibility.showSelectionMode && (
+            <SelectionModeButton disabled={visibility.selectionModeDisabled} />
+          )}
           <ThemeToggleButton />
         </div>
       </div>

@@ -15,6 +15,7 @@ import { flipbookReducer, createInitialState } from './core/flipbookReducer';
 import { computeSpreads } from './core/computeSpreads';
 import { LoadingState } from './components/LoadingState';
 import { FlipbookContext } from './core/FlipbookContext';
+import { FlipbookRefsContext, type FlipbookRefsContextValue } from './core/FlipbookRefsContext';
 import { SpreadRenderer } from './components/SpreadRenderer';
 import { AriaAnnouncer } from './components/AriaAnnouncer';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -36,6 +37,8 @@ import {
 } from './hooks/useFlipbook';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useIsomorphicLayoutEffect } from './hooks/useIsomorphicLayoutEffect';
+import { useFullScreen } from './hooks/useFullScreen';
+import { useSelectionMode } from './hooks/useSelectionMode';
 import { devWarn } from './core/devWarn';
 import { increase, decrease } from './zoom/zoomingLevel';
 import { SpecialZoomLevel } from './zoom/SpecialZoomLevel';
@@ -73,6 +76,29 @@ interface FlipbookProviderProps {
    *  committed yet. Ref-mirrored so inline arrow-function consumers see
    *  the latest callback identity on every dispatch. */
   onThemeChange?: (theme: 'light' | 'dark') => void;
+  /** Optional custom fullscreen target resolver. Receives the viewer's root
+   *  element; returns the element to fullscreen, or `null`/`undefined` to fall
+   *  back to the root. */
+  getFullScreenTarget?: (root: HTMLElement) => HTMLElement | null | undefined;
+  /** Fired after every fullscreen entry initiated through this viewer's
+   *  actions (built-in toolbar button click, programmatic
+   *  `actions.enterFullScreen()`). NOT fired when `requestFullscreen()`
+   *  rejects. NOT fired for entries initiated outside this viewer's actions
+   *  (consumer calls `someElement.requestFullscreen()` directly on the
+   *  viewer's target). Called via a ref-mirror so the latest closure is
+   *  invoked even after prop changes.
+   *
+   *  Inside this callback, the DOM is settled (`document.fullscreenElement
+   *  === target`, `data-theme` mirrored if applicable). React state
+   *  `state.isFullScreen` has been DISPATCHED but won't reflect `true` until
+   *  the next render — read the DOM rather than React state if you need the
+   *  post-transition value synchronously. */
+  onEnterFullScreen?: () => void;
+  /** Fired after every fullscreen exit FROM A COMMITTED ENTRY (toolbar
+   *  button click, `Esc` key, programmatic `actions.exitFullScreen()`,
+   *  viewer subtree unmount mid-fullscreen). Same DOM-settled /
+   *  React-state-pending caveat as `onEnterFullScreen`. */
+  onExitFullScreen?: () => void;
   /** Top-bar node rendered above the container inside `.fbjs-root`. Computed
    *  by `<Flipbook>` from the `toolbar` prop dispatch. Pass `null` to omit. */
   toolbarTopNode?: ReactNode | null;
@@ -110,6 +136,9 @@ export function FlipbookProvider({
   defaultScale = 'fit-page',
   initialTheme = 'light',
   onThemeChange,
+  getFullScreenTarget,
+  onEnterFullScreen,
+  onExitFullScreen,
   toolbarTopNode = null,
   toolbarBottomNode = null,
   thumbnailsNode = null,
@@ -133,6 +162,21 @@ export function FlipbookProvider({
   useIsomorphicLayoutEffect(() => {
     themeRef.current = state.theme;
   }, [state.theme]);
+
+  const getFullScreenTargetRef = useRef(getFullScreenTarget);
+  useIsomorphicLayoutEffect(() => {
+    getFullScreenTargetRef.current = getFullScreenTarget;
+  }, [getFullScreenTarget]);
+
+  const onEnterFullScreenRef = useRef(onEnterFullScreen);
+  useIsomorphicLayoutEffect(() => {
+    onEnterFullScreenRef.current = onEnterFullScreen;
+  }, [onEnterFullScreen]);
+
+  const onExitFullScreenRef = useRef(onExitFullScreen);
+  useIsomorphicLayoutEffect(() => {
+    onExitFullScreenRef.current = onExitFullScreen;
+  }, [onExitFullScreen]);
 
   const thumbnailsOpenRef = useRef(state.thumbnailsOpen);
   useIsomorphicLayoutEffect(() => {
@@ -207,8 +251,10 @@ export function FlipbookProvider({
   }, [viewMode, state.viewMode]);
 
   // 5. ResizeObserver
+  const rootRef = useRef<HTMLDivElement>(null);  // 6E (fullscreen target)
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const lastFocusedFullScreenButtonRef = useRef<HTMLButtonElement | null>(null);  // 6E (focus restoration)
 
   // 5a. PageRegistry (3B) — created once per provider instance. Both contexts
   // share one ref-held Map per Decision 3. Stable references across renders.
@@ -376,6 +422,13 @@ export function FlipbookProvider({
     ],
   );
 
+  const refsValue = useMemo<FlipbookRefsContextValue>(
+    () => ({ lastFocusedFullScreenButtonRef }),
+    // Deps empty: the ref's identity never rotates. useRef returns the same
+    // MutableRefObject for the provider's lifetime.
+    [],
+  );
+
   // ============================================================
   // Step 6A: Public hook layer — actions, helpers, snapshot store
   // ============================================================
@@ -533,10 +586,17 @@ export function FlipbookProvider({
   const fitPage  = useCallback(() => dispatch({ type: 'SET_ZOOM', mode: 'fit-page'  }), [dispatch]);
   const fitWidth = useCallback(() => dispatch({ type: 'SET_ZOOM', mode: 'fit-width' }), [dispatch]);
 
-  // Stub actions — bodies replaced by downstream sub-plans. Signatures stable.
-  const enterFullScreen    = useCallback((): Promise<void> => Promise.resolve(), []);  // 6E
-  const exitFullScreen     = useCallback((): Promise<void> => Promise.resolve(), []);  // 6E
-  const toggleFullScreen   = useCallback((): Promise<void> => Promise.resolve(), []);  // 6E
+  const { enterFullScreen, exitFullScreen, toggleFullScreen, canFullScreen } = useFullScreen({
+    rootRef,
+    containerRef,
+    lastFocusedFullScreenButtonRef,
+    getFullScreenTargetRef,
+    onEnterFullScreenRef,
+    onExitFullScreenRef,
+    themeRef,
+    theme: state.theme,
+    dispatch,
+  });
   const setTheme = useCallback((theme: 'light' | 'dark') => {
     dispatch({ type: 'SET_THEME', value: theme });
     onThemeChangeRef.current?.(theme);
@@ -552,7 +612,21 @@ export function FlipbookProvider({
   const toggleThumbnails = useCallback(() => {
     dispatch({ type: 'SET_THUMBNAILS_OPEN', value: !thumbnailsOpenRef.current });
   }, [dispatch]);
-  const setInteractionMode = useCallback((_mode: 'select' | 'pan') => {},          []); // 6E
+  // `isOverflowing` is the provider-local useMemo declared at FlipbookProvider.tsx:310
+  // (NOT state.isOverflowing — it's not a reducer field). `state.interactionMode` IS on
+  // the reducer state.
+  const {
+    setInteractionMode,
+    isPanning,
+    onPointerDown: onContainerPointerDown,
+    onPointerMove: onContainerPointerMove,
+    onPointerUp: onContainerPointerUp,
+  } = useSelectionMode({
+    containerRef,
+    isOverflowing,
+    interactionMode: state.interactionMode,
+    dispatch,
+  });
 
   // Source-bound stubs — rotate on source change (per Decision 1 contract).
   // 6F replaces the bodies with the actual print pipeline + download.
@@ -598,10 +672,6 @@ export function FlipbookProvider({
   // 6F will reintroduce a dep when it adds `canDownload` based on
   // `getSourceUrl()` — at that point, helpers will rotate on source change,
   // matching the action-stability contract.
-  const canFullScreen = useMemo(
-    () => typeof document !== 'undefined' && document.fullscreenEnabled,
-    [],
-  );
   const helpers = useMemo<FlipbookHookHelpers>(() => ({
     canDownload: false,   // 6F overwrites via getSourceUrl detection
     canFullScreen,
@@ -736,11 +806,12 @@ export function FlipbookProvider({
     && !isOverflowing;
 
   return (
-    <FlipbookContext.Provider value={contextValue}>
-      <FlipbookStoreContext.Provider value={storeValue}>
-        <PageRegistryWriteContext.Provider value={pageRegistry.write}>
-          <PageRegistryReadContext.Provider value={pageRegistry.read}>
-            <div className="fbjs-root" data-theme={state.theme}>
+    <FlipbookRefsContext.Provider value={refsValue}>
+      <FlipbookContext.Provider value={contextValue}>
+        <FlipbookStoreContext.Provider value={storeValue}>
+          <PageRegistryWriteContext.Provider value={pageRegistry.write}>
+            <PageRegistryReadContext.Provider value={pageRegistry.read}>
+            <div ref={rootRef} className="fbjs-root" data-theme={state.theme}>
               {toolbarTopNode}
               <div
                 ref={containerRef}
@@ -748,6 +819,13 @@ export function FlipbookProvider({
                 role="region"
                 aria-label="Document viewer"
                 tabIndex={0}
+                data-overflowing={isOverflowing ? 'true' : undefined}
+                data-fbjs-interaction-mode={state.interactionMode === 'pan' ? 'pan' : undefined}
+                data-fbjs-panning={isPanning ? 'true' : undefined}
+                onPointerDown={onContainerPointerDown}
+                onPointerMove={onContainerPointerMove}
+                onPointerUp={onContainerPointerUp}
+                onPointerCancel={onContainerPointerUp}
               >
                 {currentError && (
                   renderError?.(currentError) ?? (
@@ -785,9 +863,10 @@ export function FlipbookProvider({
               {toolbarBottomNode}
             </div>
             {children}
-          </PageRegistryReadContext.Provider>
-        </PageRegistryWriteContext.Provider>
-      </FlipbookStoreContext.Provider>
-    </FlipbookContext.Provider>
+            </PageRegistryReadContext.Provider>
+          </PageRegistryWriteContext.Provider>
+        </FlipbookStoreContext.Provider>
+      </FlipbookContext.Provider>
+    </FlipbookRefsContext.Provider>
   );
 }

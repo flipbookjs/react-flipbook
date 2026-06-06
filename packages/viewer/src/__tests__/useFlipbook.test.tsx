@@ -284,3 +284,46 @@ describe('actions.goToPage — 1-indexed contract + OOB no-op', () => {
     warnSpy.mockRestore();
   });
 });
+
+describe('actions.enterFullScreen — wraps requestFullscreen + resolves on transition', () => {
+  it('actions.enterFullScreen wraps requestFullscreen and resolves on transition', async () => {
+    const originalRequestFs = HTMLElement.prototype.requestFullscreen;
+    const originalExitFs = document.exitFullscreen;
+    Object.defineProperty(document, 'fullscreenEnabled', { configurable: true, value: true });
+    Object.defineProperty(document, 'fullscreenElement', { configurable: true, value: null, writable: true });
+
+    let resolveFs!: () => void;
+    HTMLElement.prototype.requestFullscreen = vi.fn(() => new Promise<void>((res) => { resolveFs = res; }));
+    document.exitFullscreen = vi.fn().mockResolvedValue(undefined);
+
+    try {
+      const source = makeSource();
+      const { result } = renderHook(() => useFlipbook(), { wrapper: wrap(source) });
+      await vi.waitFor(() => expect(result.current.status).toBe('ready'));
+
+      const rootElement = document.querySelector('.fbjs-root') as HTMLElement;
+      expect(rootElement).not.toBeNull();
+
+      let enterPromise!: Promise<void>;
+      await act(async () => {
+        enterPromise = result.current.actions.enterFullScreen();
+      });
+
+      // Drive the listener: resolve the underlying requestFullscreen and
+      // dispatch fullscreenchange with our root as the fullscreenElement.
+      resolveFs();
+      Object.defineProperty(document, 'fullscreenElement', { configurable: true, value: rootElement, writable: true });
+      await act(async () => { document.dispatchEvent(new Event('fullscreenchange')); });
+
+      await enterPromise;
+      await vi.waitFor(() => expect(result.current.state.isFullScreen).toBe(true));
+
+      // Settle the exit so cleanup() doesn't reject pending Promises.
+      Object.defineProperty(document, 'fullscreenElement', { configurable: true, value: null, writable: true });
+      await act(async () => { document.dispatchEvent(new Event('fullscreenchange')); });
+    } finally {
+      HTMLElement.prototype.requestFullscreen = originalRequestFs;
+      document.exitFullscreen = originalExitFs;
+    }
+  });
+});

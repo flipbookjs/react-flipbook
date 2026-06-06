@@ -1,0 +1,40 @@
+@layer flipbook {
+
+/* Active pan rules: apply ONLY when pan mode is set AND content overflows.
+   When pan is armed but inactive (consumer programmatically set pan mode
+   at fit-page zoom), the pan handlers no-op via the isOverflowing gate AND
+   these rules don't apply — `touch-action` falls back to its default so
+   native page/parent scroll over the viewer keeps working. */
+.fbjs-container[data-fbjs-interaction-mode="pan"][data-overflowing="true"] {
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  /* Suppress native scroll/zoom so our pointer handlers can claim the
+     gesture. Without this, touch input fires pointerdown then the browser
+     commits to native scroll and dispatches pointercancel — pointermove
+     stops firing and pan never engages on touch. Per pointer-events spec. */
+  touch-action: none;
+  /* Force synchronous scroll updates. If a consumer's stylesheet declares
+     `scroll-behavior: smooth` on .fbjs-container (or inherits it), our
+     scrollLeft/Top assignments would animate over ~300ms, making pan drag
+     feel laggy. */
+  scroll-behavior: auto;
+}
+
+.fbjs-container[data-fbjs-interaction-mode="pan"][data-overflowing="true"][data-fbjs-panning="true"] {
+  cursor: grabbing;
+}
+
+/* Armed-but-inactive fallback: pan mode set without overflow. The curl-aware
+   toolbar hides the toggle button in this state, but consumer-side
+   actions.setInteractionMode('pan') still sets state.interactionMode='pan'.
+   No pan rules apply above; cursor stays as the browser default. Explicitly
+   declare default cursor here for documentation — the rule is redundant
+   (no other rule sets cursor in this case) but signals intent to a reader
+   inspecting the DOM and seeing data-fbjs-interaction-mode="pan" but no
+   grab cursor. */
+.fbjs-container[data-fbjs-interaction-mode="pan"]:not([data-overflowing="true"]) {
+  cursor: default;
+}
+
+} /* end @layer flipbook */

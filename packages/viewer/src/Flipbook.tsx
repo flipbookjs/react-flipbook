@@ -76,6 +76,17 @@ export interface FlipbookProps extends VisibilityProps {
   /** Title rendered in the built-in toolbar's top bar. Suppressed when
    *  `compact={true}`. Ignored when `toolbar` is a custom ReactNode. */
   title?: ReactNode;
+  /** Optional custom fullscreen target resolver. Receives the viewer's
+   *  root element; returns the element to fullscreen, or `null`/`undefined`
+   *  to fall back to the root. See `FlipbookProviderProps` for full
+   *  semantics. */
+  getFullScreenTarget?: (root: HTMLElement) => HTMLElement | null | undefined;
+  /** Fired after every fullscreen entry initiated through this viewer's
+   *  actions. See `FlipbookProviderProps` for full semantics. */
+  onEnterFullScreen?: () => void;
+  /** Fired after every fullscreen exit from a committed entry. See
+   *  `FlipbookProviderProps` for full semantics. */
+  onExitFullScreen?: () => void;
 }
 
 export function Flipbook({
@@ -89,6 +100,9 @@ export function Flipbook({
   defaultScale = 'fit-page',
   initialTheme = 'light',
   onThemeChange,
+  getFullScreenTarget,
+  onEnterFullScreen,
+  onExitFullScreen,
   toolbar = true,
   compact,
   title,
@@ -179,6 +193,7 @@ export function Flipbook({
         showZoom={showZoom}
         showNavigation={showNavigation}
         showThumbnails={showThumbnails}
+        enablePageCurl={enablePageCurl}
       />
     );
     toolbarBottomNode = (
@@ -193,6 +208,7 @@ export function Flipbook({
         showZoom={showZoom}
         showNavigation={showNavigation}
         showThumbnails={showThumbnails}
+        enablePageCurl={enablePageCurl}
       />
     );
   } else if (isSlotObject(toolbar)) {
@@ -234,6 +250,9 @@ export function Flipbook({
       defaultScale={defaultScale}
       initialTheme={initialTheme}
       onThemeChange={onThemeChange}
+      getFullScreenTarget={getFullScreenTarget}
+      onEnterFullScreen={onEnterFullScreen}
+      onExitFullScreen={onExitFullScreen}
       toolbarTopNode={toolbarTopNode}
       toolbarBottomNode={toolbarBottomNode}
       thumbnailsNode={thumbnailsNode}

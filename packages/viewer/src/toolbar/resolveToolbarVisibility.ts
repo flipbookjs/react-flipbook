@@ -18,12 +18,20 @@
  * - `showFullScreen`: `slice.canFullScreen` (false during SSR; true on
  *   browsers exposing the Fullscreen API; consumer can hide on supported
  *   browsers with explicit `false`)
- * - `showSelectionMode`: true (6E will refine by AND-ing with `!curlMode`
- *   when the curl-mode flag lands; 6C ships the true default)
+ * - `showSelectionMode`: true (always visible by default; curl coordination
+ *   uses `selectionModeDisabled` instead of hiding — see below)
  * - `showZoom`: true
  * - `showNavigation`: true
  * - `showThumbnails`: true (not capability-gated; every PageSource
  *   implements `getPageSize` + `renderPage`)
+ *
+ * Disabled-state derivation:
+ * - `selectionModeDisabled`: `(enablePageCurl ?? false) && !slice.isOverflowing`.
+ *   When curl is engaged and content fits (pan would be a no-op), the button
+ *   stays visible but renders in a disabled state. This replaces the v0.1
+ *   "hide" approach — see D8 / KL2 for the design rationale: an empty toolbar
+ *   slot reads as a bug to users; a disabled button is unambiguously
+ *   "feature exists but not available now".
  *
  * Used by `<Toolbar>` after a `useFlipbookSelector` reads the slice via a
  * shallowly-compared object selector.
@@ -37,11 +45,24 @@ export interface VisibilityProps {
   showZoom?: boolean;
   showNavigation?: boolean;
   showThumbnails?: boolean;
+  /** Mirrors `<Flipbook enablePageCurl>` for curl-aware toolbar disabled-state.
+   *  When true, the selection-mode button renders DISABLED (not hidden) while
+   *  curl is actively engaged (content fits — curl captures pointer events)
+   *  and becomes enabled when zoom causes overflow (curl auto-disengages).
+   *  See the resolver function's JSDoc for the per-field disabled rule.
+   *  Consumers mounting `<Toolbar>` directly should forward their own
+   *  `enablePageCurl` value to maintain the contract. */
+  enablePageCurl?: boolean;
 }
 
 export interface VisibilitySlice {
   canDownload: boolean;
   canFullScreen: boolean;
+  /** True when the container's scaled content exceeds its viewport. Read from
+   *  `FlipbookHookState.isOverflowing` (the curated public mirror of the
+   *  provider's derived `isOverflowing` useMemo — NOT a reducer state field).
+   *  Consumed by the curl-aware `showSelectionMode` refinement. */
+  isOverflowing: boolean;
 }
 
 export interface ResolvedVisibility {
@@ -49,6 +70,10 @@ export interface ResolvedVisibility {
   showDownload: boolean;
   showFullScreen: boolean;
   showSelectionMode: boolean;
+  /** True when the selection-mode button should render in a disabled state.
+   *  Derived from `(enablePageCurl ?? false) && !isOverflowing`: curl
+   *  coordination keeps the button visible but inert when pan would no-op. */
+  selectionModeDisabled: boolean;
   showZoom: boolean;
   showNavigation: boolean;
   showThumbnails: boolean;
@@ -59,12 +84,13 @@ export function resolveToolbarVisibility(
   slice: VisibilitySlice,
 ): ResolvedVisibility {
   return {
-    showPrint:         props.showPrint         ?? true,
-    showDownload:      props.showDownload      ?? slice.canDownload,
-    showFullScreen:    props.showFullScreen    ?? slice.canFullScreen,
-    showSelectionMode: props.showSelectionMode ?? true,
-    showZoom:          props.showZoom          ?? true,
-    showNavigation:    props.showNavigation    ?? true,
-    showThumbnails:    props.showThumbnails    ?? true,
+    showPrint:             props.showPrint         ?? true,
+    showDownload:          props.showDownload      ?? slice.canDownload,
+    showFullScreen:        props.showFullScreen    ?? slice.canFullScreen,
+    showSelectionMode:     props.showSelectionMode ?? true,
+    selectionModeDisabled: (props.enablePageCurl ?? false) && !slice.isOverflowing,
+    showZoom:              props.showZoom          ?? true,
+    showNavigation:        props.showNavigation    ?? true,
+    showThumbnails:        props.showThumbnails    ?? true,
   };
 }
