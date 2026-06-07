@@ -39,6 +39,8 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useIsomorphicLayoutEffect } from './hooks/useIsomorphicLayoutEffect';
 import { useFullScreen } from './hooks/useFullScreen';
 import { useSelectionMode } from './hooks/useSelectionMode';
+import { usePrint, type PrintCallbacks } from './hooks/usePrint';
+import { usePrintErrorDismiss } from './hooks/usePrintErrorDismiss';
 import { devWarn } from './core/devWarn';
 import { increase, decrease } from './zoom/zoomingLevel';
 import { SpecialZoomLevel } from './zoom/SpecialZoomLevel';
@@ -50,6 +52,66 @@ import { pageToSpreadIndex as findSpreadByPageIndex } from './core/computeSpread
  * without affecting the base viewer.
  */
 const LazyCurlOverlay = lazy(() => import('./curl/CurlOverlay'));
+
+// ---- Print validation helpers (Step 6F1 / Step 1.4) ----
+// Module-private; sole caller is FlipbookProvider's prop-acceptance useMemo
+// blocks (Step 4.2). Co-located here per the `clampCustomScale` precedent in
+// flipbookReducer.ts — small helpers live alongside their consumer, no
+// dedicated util file.
+
+const PRINT_SCALE_MIN = 0.5;  // ~36 DPI floor — anything less is illegible
+const PRINT_SCALE_MAX = 6.0;  // ~432 DPI ceiling — anything more risks per-page OOM
+const PRINT_SCALE_DEFAULT = 2.0;
+
+// Mirrors the project convention from `clampCustomScale` (flipbookReducer.ts).
+// NaN is special-cased (no clamp direction → fallback to default); ±Infinity
+// are valid intents ("maximum / minimum scale") that clamp to MAX / MIN
+// respectively via the natural `<` / `>` comparisons. This is the same fix
+// the reducer's F2 round applied — an earlier draft of THIS helper used
+// `!Number.isFinite(raw)` as a single non-finite guard, which incorrectly
+// lumped ±Infinity in with NaN and silently fell back to the default
+// instead of clamping. Keep this ordering: NaN check FIRST, then range.
+function clampPrintScale(raw: number): number {
+  if (Number.isNaN(raw)) {
+    devWarn(
+      `[flipbook] printScale=NaN; falling back to default ${PRINT_SCALE_DEFAULT}. ` +
+      `Set a finite number in [${PRINT_SCALE_MIN}, ${PRINT_SCALE_MAX}] to suppress this warning.`,
+    );
+    return PRINT_SCALE_DEFAULT;
+  }
+  if (raw < PRINT_SCALE_MIN) {
+    devWarn(`[flipbook] printScale=${raw} clamped to ${PRINT_SCALE_MIN}.`);
+    return PRINT_SCALE_MIN;
+  }
+  if (raw > PRINT_SCALE_MAX) {
+    devWarn(`[flipbook] printScale=${raw} clamped to ${PRINT_SCALE_MAX}.`);
+    return PRINT_SCALE_MAX;
+  }
+  return raw;
+}
+
+const PRINT_MAX_PAGES_DEFAULT = 100;
+
+function sanitizePrintMaxPages(raw: number): number {
+  // Infinity is a deliberately supported opt-out; pass through unchanged.
+  if (raw === Infinity) return Infinity;
+  // Otherwise must be a finite number ≥ 1. NaN/negative/zero/non-finite AND
+  // raw ∈ (0, 1) all fall back to default with a per-value dev-warn
+  // (F4 — fires once per unique invalid value, twice per unique value under
+  // StrictMode). The `< 1` guard (not `<= 0`) is load-bearing: a raw value
+  // like 0.5 would otherwise pass the `> 0` check and then `Math.floor(0.5)`
+  // would return 0 — which the too-large pipeline interprets as "no pages
+  // allowed" and silently fails every print with a "limit 0" banner.
+  if (!Number.isFinite(raw) || raw < 1) {
+    devWarn(
+      `[flipbook] printMaxPages=${raw} is invalid (must be a finite number ≥ 1 or Infinity); ` +
+      `using default ${PRINT_MAX_PAGES_DEFAULT}.`,
+    );
+    return PRINT_MAX_PAGES_DEFAULT;
+  }
+  // Fractional values ≥ 1 get floored — printing 1.5 pages isn't meaningful.
+  return Math.floor(raw);
+}
 
 interface FlipbookProviderProps {
   source: PageSource;
@@ -123,6 +185,29 @@ interface FlipbookProviderProps {
    *  `Flipbook.tsx` does NOT pass children; this is for renderHook-based
    *  tests in Phase 7 and for advanced consumers who need to render an
    *  ad-hoc component alongside the viewer with shared state. */
+
+  /** Hard ceiling for streaming print render. Default 100 (applied at the
+   *  provider's destructure). See `FlipbookProps.printMaxPages` for the
+   *  full prop semantics including the `Infinity` opt-out + invalid-value
+   *  sanitization. */
+  printMaxPages?: number;
+  /** Per-page rasterization scale. Default 2.0. See
+   *  `FlipbookProps.printScale` for the [0.5, 6.0] clamp behavior. */
+  printScale?: number;
+  /** Auto-dismiss timer (ms) for the print-error banner. Default 8000.
+   *  See `FlipbookProps.printErrorDismissMs` for the disable values
+   *  (0 / Infinity / NaN / negative). */
+  printErrorDismissMs?: number;
+  /** Print-pipeline lifecycle callbacks. See the matching `FlipbookProps`
+   *  fields for fire-timing semantics. Ref-mirrored via `printCallbacksRef`
+   *  so the latest closures fire even after rapid prop changes; the action
+   *  identities (`actions.print`, `actions.cancelPrint`) stay stable across
+   *  consumer-prop changes. */
+  onPrintStart?: (info: { totalPages: number; scale: number }) => void;
+  onPrintComplete?: (info: { totalPages: number; durationMs: number }) => void;
+  onPrintError?: (error: Error, info: { phase: 'too-large' | 'render' | 'blob' }) => void;
+  onPrintAbort?: (info: { reason: 'unmount' | 'source-change' | 'user-cancel' }) => void;
+
   children?: ReactNode;
 }
 
@@ -142,6 +227,13 @@ export function FlipbookProvider({
   toolbarTopNode = null,
   toolbarBottomNode = null,
   thumbnailsNode = null,
+  printMaxPages: printMaxPagesRaw = 100,
+  printScale: printScaleRaw = 2.0,
+  printErrorDismissMs = 8000,
+  onPrintStart,
+  onPrintComplete,
+  onPrintError,
+  onPrintAbort,
   children,
 }: FlipbookProviderProps) {
   // 1. Reducer
@@ -628,10 +720,59 @@ export function FlipbookProvider({
     dispatch,
   });
 
-  // Source-bound stubs — rotate on source change (per Decision 1 contract).
-  // 6F replaces the bodies with the actual print pipeline + download.
-  const print: () => Promise<void> = useCallback(() => Promise.resolve(), [source]);
-  const download: () => void       = useCallback(() => {},                [source]);
+  // Sanitize / clamp print props at the prop-acceptance boundary (Step 1.4
+  // helpers defined at module scope above). The sanitized/clamped values are
+  // what the hook sees — `printScaleClamped` ∈ [0.5, 6.0]; `printMaxPagesSanitized`
+  // is either a finite positive integer (≥1) or `Infinity` (the documented
+  // opt-out). Invalid raw values fire a per-value devWarn and fall back.
+  const printMaxPagesSanitized = useMemo(
+    () => sanitizePrintMaxPages(printMaxPagesRaw),
+    [printMaxPagesRaw],
+  );
+  const printScaleClamped = useMemo(
+    () => clampPrintScale(printScaleRaw),
+    [printScaleRaw],
+  );
+
+  // Single ref containing all four print-lifecycle callbacks. Synced via
+  // useIsomorphicLayoutEffect so the latest closure is invoked even after
+  // rapid prop changes. (Deliberately diverges from 6E's per-callback ref
+  // pattern — 6E uses one useRef + one useIsomorphicLayoutEffect per
+  // fullscreen callback. Print bundles all four into one ref + one effect
+  // because the larger callback count and the typical inline-destructure
+  // usage rotate them together anyway.)
+  const printCallbacksRef = useRef<PrintCallbacks>({
+    onPrintStart, onPrintComplete, onPrintError, onPrintAbort,
+  });
+  useIsomorphicLayoutEffect(() => {
+    printCallbacksRef.current = {
+      onPrintStart, onPrintComplete, onPrintError, onPrintAbort,
+    };
+  }, [onPrintStart, onPrintComplete, onPrintError, onPrintAbort]);
+
+  const { print, cancelPrint } = usePrint({
+    source,
+    dispatch,
+    pageCount: state.pageCount,
+    isPrinting: state.isPrinting,
+    printMaxPages: printMaxPagesSanitized,
+    printScale: printScaleClamped,
+    callbacksRef: printCallbacksRef,
+  });
+
+  usePrintErrorDismiss({
+    printError: state.printError,
+    printErrorDismissMs,
+    dispatch,
+  });
+
+  const dismissPrintError = useCallback(() => {
+    dispatch({ type: 'CLEAR_PRINT_ERROR' });
+  }, [dispatch]);
+
+  // Download stub — rotates on source change (per Decision 1 contract).
+  // 6F1 replaces only the print stub; download stays as a stub for now.
+  const download: () => void = useCallback(() => {}, [source]);
 
   // ---- Actions object: useMemo so identity is stable across non-source-
   //      change renders. Every action ref above is stable except print/download
@@ -645,6 +786,7 @@ export function FlipbookProvider({
     setThumbnailsOpen, toggleThumbnails,
     setInteractionMode,
     print, download,
+    dismissPrintError, cancelPrint,
   }), [
     next, previous, goToPage, goToFirst, goToLast,
     zoomIn, zoomOut, setZoom, fitPage, fitWidth,
@@ -653,6 +795,7 @@ export function FlipbookProvider({
     setThumbnailsOpen, toggleThumbnails,
     setInteractionMode,
     print, download,
+    dismissPrintError, cancelPrint,
   ]);
 
   // ---- Helpers ----

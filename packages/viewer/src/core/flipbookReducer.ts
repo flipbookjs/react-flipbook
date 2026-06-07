@@ -33,11 +33,26 @@ export interface FlipbookState {
    *  the old source is invalid; the AbortController in 6F's print hook is the
    *  primary defense, this reset is the backstop). */
   isPrinting: boolean;
-  /** Surface of print-pipeline errors (currently only the
-   *  `printMaxPages`-ceiling rejection). Cleared on dismiss click,
-   *  `printErrorDismissMs` timer (effect-owned in 6F), or SOURCE_CHANGED.
-   *  6F dispatches SET_PRINT_ERROR / CLEAR_PRINT_ERROR. */
-  printError: { type: 'too-large'; totalPages: number; limit: number } | null;
+  /** Surface of print-pipeline errors — three variants: `'too-large'` (the
+   *  `printMaxPages`-ceiling rejection), `'render-failed'` (per-page render
+   *  throw including decode failures), `'blob-conversion-failed'` (canvas
+   *  too large for `toBlob` or `toBlob` returned null). Cleared on dismiss
+   *  click, `printErrorDismissMs` timer (effect-owned in 6F), or
+   *  SOURCE_CHANGED. 6F dispatches SET_PRINT_ERROR / CLEAR_PRINT_ERROR.
+   *
+   *  Naming-inconsistency note: the `'too-large'` payload field is
+   *  `totalPages` while this reducer's state field is `pageCount`. The two
+   *  refer to the same value (total page count); the divergence is
+   *  historical (6A's printError variant was designed before the broader
+   *  reducer field naming settled). At error-dispatch time, the hook reads
+   *  `state.pageCount` and writes it as `payload.totalPages` —
+   *  `printError.totalPages` mirrors `state.pageCount` at the dispatch
+   *  instant. Future readers chasing a difference will find none. */
+  printError:
+    | { type: 'too-large'; totalPages: number; limit: number }
+    | { type: 'render-failed'; pageIndex: number; message: string }
+    | { type: 'blob-conversion-failed'; pageIndex: number; canvasWidth: number; canvasHeight: number }
+    | null;
   // ---- Step 6D additions ----
   /** Whether the built-in thumbnail panel is open. Toggled via
    *  `actions.setThumbnailsOpen` / `actions.toggleThumbnails`.
@@ -59,7 +74,13 @@ export type FlipbookAction =
   | { type: 'SET_THEME'; value: 'light' | 'dark' }
   | { type: 'SET_INTERACTION_MODE'; value: 'select' | 'pan' }
   | { type: 'SET_PRINTING'; value: boolean }
-  | { type: 'SET_PRINT_ERROR'; payload: { type: 'too-large'; totalPages: number; limit: number } }
+  | {
+      type: 'SET_PRINT_ERROR';
+      payload:
+        | { type: 'too-large'; totalPages: number; limit: number }
+        | { type: 'render-failed'; pageIndex: number; message: string }
+        | { type: 'blob-conversion-failed'; pageIndex: number; canvasWidth: number; canvasHeight: number };
+    }
   | { type: 'CLEAR_PRINT_ERROR' }
   // ---- Step 6D additions ----
   | { type: 'SET_THUMBNAILS_OPEN'; value: boolean };

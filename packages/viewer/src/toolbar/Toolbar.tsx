@@ -7,6 +7,7 @@ import { ZoomInButton } from './buttons/ZoomInButton';
 import { ZoomOutButton } from './buttons/ZoomOutButton';
 import { FullScreenButton } from './buttons/FullScreenButton';
 import { PrintButton } from './buttons/PrintButton';
+import { PrintErrorBanner } from './PrintErrorBanner';
 import { DownloadButton } from './buttons/DownloadButton';
 import { SelectionModeButton } from './buttons/SelectionModeButton';
 import { ThemeToggleButton } from './buttons/ThemeToggleButton';
@@ -93,6 +94,7 @@ export const Toolbar = memo(function Toolbar({
       canDownload: s.helpers.canDownload,
       canFullScreen: s.helpers.canFullScreen,
       isOverflowing: s.state.isOverflowing,
+      printError: s.state.printError,
     }),
     shallowEqual,
   );
@@ -129,35 +131,43 @@ export const Toolbar = memo(function Toolbar({
   }
 
   // Bottom bar — navigation + zoom + thumbnails + selection-mode + theme-toggle.
+  // Wrapped in `.fbjs-toolbar-stack` so `<PrintErrorBanner>` can render as a
+  // SIBLING above the toolbar shell — NOT a child (toolbar-role purity:
+  // toolbar children should be controls/groups, a status banner is neither).
   return (
-    <ToolbarShell aria-label={LABELS.toolbarBottomBarLabel} className="fbjs-toolbar__bar--bottom">
-      {visibility.showNavigation && (
-        <div className="fbjs-toolbar__section fbjs-toolbar__section--left">
+    <div className="fbjs-toolbar-stack">
+      {slice.printError !== null && visibility.showPrint && (
+        <PrintErrorBanner />
+      )}
+      <ToolbarShell aria-label={LABELS.toolbarBottomBarLabel} className="fbjs-toolbar__bar--bottom">
+        {visibility.showNavigation && (
+          <div className="fbjs-toolbar__section fbjs-toolbar__section--left">
+            <div className="fbjs-toolbar__group">
+              <PrevButton />
+              <PageReadout />
+              <NextButton />
+            </div>
+          </div>
+        )}
+        {visibility.showZoom && (
+          <div className="fbjs-toolbar__section fbjs-toolbar__section--center">
+            <div className="fbjs-toolbar__group">
+              <ZoomOutButton />
+              <ZoomReadout />
+              <ZoomInButton />
+            </div>
+          </div>
+        )}
+        <div className="fbjs-toolbar__section fbjs-toolbar__section--right">
           <div className="fbjs-toolbar__group">
-            <PrevButton />
-            <PageReadout />
-            <NextButton />
+            {visibility.showThumbnails && <ThumbnailsToggleButton />}
+            {visibility.showSelectionMode && (
+              <SelectionModeButton disabled={visibility.selectionModeDisabled} />
+            )}
+            <ThemeToggleButton />
           </div>
         </div>
-      )}
-      {visibility.showZoom && (
-        <div className="fbjs-toolbar__section fbjs-toolbar__section--center">
-          <div className="fbjs-toolbar__group">
-            <ZoomOutButton />
-            <ZoomReadout />
-            <ZoomInButton />
-          </div>
-        </div>
-      )}
-      <div className="fbjs-toolbar__section fbjs-toolbar__section--right">
-        <div className="fbjs-toolbar__group">
-          {visibility.showThumbnails && <ThumbnailsToggleButton />}
-          {visibility.showSelectionMode && (
-            <SelectionModeButton disabled={visibility.selectionModeDisabled} />
-          )}
-          <ThemeToggleButton />
-        </div>
-      </div>
-    </ToolbarShell>
+      </ToolbarShell>
+    </div>
   );
 });

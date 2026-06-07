@@ -2,6 +2,7 @@
 @import './toolbar.css';
 @import './thumbnails.css';
 @import './interactionMode.css';
+@import './print.css';
 
 .fbjs-container {
   position: relative;

@@ -39,4 +39,11 @@ export const LABELS = {
   thumbnailPanelLabel: 'Page thumbnails',
   thumbnailsToggle: 'Toggle thumbnails',
   thumbnailButton: (pageNumber: number, totalPages: number) => `Go to page ${pageNumber} of ${totalPages}`,
+  printTooLarge: (totalPages: number, limit: number) =>
+    `Document too large to print as one job (${totalPages} pages, limit ${limit}). Page range support coming in v0.2.`,
+  printRenderFailed: (pageIndex: number, message: string) =>
+    `Failed to render page ${pageIndex + 1} for printing: ${message}`,
+  printBlobConversionFailed: (pageIndex: number, canvasWidth: number, canvasHeight: number) =>
+    `Failed to encode page ${pageIndex + 1} (canvas size ${canvasWidth}×${canvasHeight}). Try reducing printScale.`,
+  dismissPrintError: 'Dismiss',
 } as const;

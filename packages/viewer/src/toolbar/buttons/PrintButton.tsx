@@ -3,7 +3,7 @@ import { useFlipbookActions, useFlipbookSelector, shallowEqual } from '../../hoo
 import { useToolbarPart } from '../useToolbarPart';
 import { composeHandlers, composeKeyDownHandlers } from '../composeHandlers';
 import { mergeRefs } from '../mergeRefs';
-import { PrinterIcon } from '../icons';
+import { PrinterIcon, SpinnerIcon } from '../icons';
 import { LABELS } from '../labels';
 import { devWarn } from '../../core/devWarn';
 
@@ -56,7 +56,7 @@ export const PrintButton = memo(forwardRef<HTMLButtonElement,
       onFocus={handleFocus}
       onKeyDown={handleKeyDown}
     >
-      <PrinterIcon />
+      {isPrinting ? <SpinnerIcon /> : <PrinterIcon />}
     </button>
   );
 }));

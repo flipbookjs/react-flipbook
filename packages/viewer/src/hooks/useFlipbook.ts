@@ -29,7 +29,11 @@ export interface FlipbookHookState {
   theme: 'light' | 'dark';
   interactionMode: 'select' | 'pan';
   isPrinting: boolean;
-  printError: { type: 'too-large'; totalPages: number; limit: number } | null;
+  printError:
+    | { type: 'too-large'; totalPages: number; limit: number }
+    | { type: 'render-failed'; pageIndex: number; message: string }
+    | { type: 'blob-conversion-failed'; pageIndex: number; canvasWidth: number; canvasHeight: number }
+    | null;
   thumbnailsOpen: boolean;
 }
 
@@ -54,6 +58,16 @@ export interface FlipbookHookActions {
   download: () => void;
   setThumbnailsOpen: (open: boolean) => void;
   toggleThumbnails: () => void;
+  dismissPrintError: () => void;
+  /**
+   * User-initiated cancel of an in-flight print job. Provides an escape from
+   * the `isPrinting=true` state when `afterprint` never fires — see KL12 (dialog
+   * left open indefinitely) and KL23 (Android WebView / WKWebView). Tears down
+   * the print sheet, revokes blob URLs, aborts in-flight `renderPage`/`decode`,
+   * and resets `isPrinting` to `false`. Fires `onPrintAbort({ reason:
+   * 'user-cancel' })`. No-op if no print is in flight.
+   */
+  cancelPrint: () => void;
 }
 
 export interface FlipbookHookHelpers {
@@ -203,6 +217,8 @@ export const SSR_ACTIONS: FlipbookHookActions = Object.freeze({
   download: () => {},
   setThumbnailsOpen: () => {},
   toggleThumbnails: () => {},
+  dismissPrintError: () => {},
+  cancelPrint: () => {},
 }) as FlipbookHookActions;
 
 /** Default helpers — all-false / always-(-1) — used by SSR_HOOK and SSR_SNAPSHOT. */

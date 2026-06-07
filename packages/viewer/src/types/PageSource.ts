@@ -32,6 +32,23 @@ export interface PageSource {
    * DPI scaling (devicePixelRatio) is the caller's responsibility,
    * passed via the scale parameter.
    *
+   * **Contract: this method MUST return a FRESH HTMLCanvasElement per call** — NOT a
+   * pooled or reused canvas instance. The print pipeline (Step 6F1) zeroes
+   * `canvas.width = canvas.height = 0` after consuming the canvas, which is the only
+   * reliable way to make the backing buffer GC-eligible before the next page renders.
+   * Doing this on a pooled canvas would corrupt subsequent renders. Implementations
+   * that want to reuse a single canvas internally should still construct + return a
+   * new `HTMLCanvasElement` per call (copy the rendered bitmap if needed).
+   *
+   * If `signal` is provided, the implementation MUST monitor it and reject with an
+   * `Error` (or `DOMException`) whose **`.name === 'AbortError'`** when the signal
+   * fires during render. Consumers (specifically the print pipeline in Step 6F1)
+   * use the `.name` check to silently absorb cancellation vs surface real failures —
+   * a generic-Error rejection will be treated as a render failure and surfaced to
+   * the user. Implementations may use `new DOMException('aborted', 'AbortError')`
+   * (preferred — standard shape) OR assign `err.name = 'AbortError'` on a plain
+   * Error before throwing.
+   *
    * @param index - Zero-based page index
    * @param scale - Scale factor (1.0 = CSS pixels, 2.0 = retina)
    * @param signal - Optional AbortSignal to cancel in-flight renders

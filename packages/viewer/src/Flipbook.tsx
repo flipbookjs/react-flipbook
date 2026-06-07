@@ -87,6 +87,32 @@ export interface FlipbookProps extends VisibilityProps {
   /** Fired after every fullscreen exit from a committed entry. See
    *  `FlipbookProviderProps` for full semantics. */
   onExitFullScreen?: () => void;
+
+  /** Hard ceiling for streaming print render. Defaults to 100 (Safari iOS quota
+   *  empirical floor at printScale=2.0). Pass `Infinity` to opt out (consumer's
+   *  responsibility if it crashes their tab). Invalid values (NaN, ≤0,
+   *  non-finite) fall back to the default with a dev-warn. */
+  printMaxPages?: number;
+  /** Per-page rasterization scale. Default 2.0 (≈ 144 DPI). Clamped to
+   *  [0.5, 6.0] at the prop-acceptance boundary with a dev-warn on
+   *  out-of-range. */
+  printScale?: number;
+  /** Auto-dismiss timer for the print-error banner (ms). Default 8000.
+   *  0 / Infinity / NaN / negative = disable auto-dismiss (consumer dismisses
+   *  via click or programmatically via `actions.dismissPrintError()`). */
+  printErrorDismissMs?: number;
+  /** Fires once per print invocation when the pipeline begins rendering (after
+   *  re-entry / zero-page / too-large guards pass). NOT fired for guard
+   *  rejections — too-large surfaces via `onPrintError` with `phase: 'too-large'`. */
+  onPrintStart?: (info: { totalPages: number; scale: number }) => void;
+  /** Fires after `afterprint` cleanup on the successful path. `durationMs`
+   *  measured via `performance.now()` (monotonic). */
+  onPrintComplete?: (info: { totalPages: number; durationMs: number }) => void;
+  /** Fires on any error path — too-large guard, per-page render failure, or
+   *  blob-conversion failure. The `phase` discriminator distinguishes which. */
+  onPrintError?: (error: Error, info: { phase: 'too-large' | 'render' | 'blob' }) => void;
+  /** Fires when an in-flight print is aborted by unmount or source change. */
+  onPrintAbort?: (info: { reason: 'unmount' | 'source-change' | 'user-cancel' }) => void;
 }
 
 export function Flipbook({
@@ -113,6 +139,13 @@ export function Flipbook({
   showZoom,
   showNavigation,
   showThumbnails,
+  printMaxPages,
+  printScale,
+  printErrorDismissMs,
+  onPrintStart,
+  onPrintComplete,
+  onPrintError,
+  onPrintAbort,
 }: FlipbookProps) {
   const internalSource = useMemo(
     () => (url ? new PdfjsSource(url) : null),
@@ -256,6 +289,13 @@ export function Flipbook({
       toolbarTopNode={toolbarTopNode}
       toolbarBottomNode={toolbarBottomNode}
       thumbnailsNode={thumbnailsNode}
+      printMaxPages={printMaxPages}
+      printScale={printScale}
+      printErrorDismissMs={printErrorDismissMs}
+      onPrintStart={onPrintStart}
+      onPrintComplete={onPrintComplete}
+      onPrintError={onPrintError}
+      onPrintAbort={onPrintAbort}
     />
   );
 }

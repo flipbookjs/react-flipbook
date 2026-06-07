@@ -150,3 +150,26 @@ export function MoonIcon(props: IconProps) {
     </Icon>
   );
 }
+
+/** Concentric spinner — bottom-half arc rotates via CSS animation
+ *  (`.fbjs-toolbar__spinner` rule in print.css). Reduced-motion users see
+ *  the static arc (still visually distinct from PrinterIcon). */
+export function SpinnerIcon(props: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="1em"
+      height="1em"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="fbjs-toolbar__spinner"
+      aria-hidden="true"
+      {...props}
+    >
+      <path d="M12 2 A 10 10 0 0 1 22 12" />
+    </svg>
+  );
+}

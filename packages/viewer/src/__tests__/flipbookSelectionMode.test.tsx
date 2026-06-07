@@ -221,7 +221,7 @@ describe('resolveToolbarVisibility — curl-coordination disabled flag', () => {
   it('7. selectionModeDisabled=true when enablePageCurl=true AND !isOverflowing', () => {
     const result = resolveToolbarVisibility(
       { showSelectionMode: true, enablePageCurl: true },
-      { canDownload: false, canFullScreen: false, isOverflowing: false },
+      { canDownload: false, canFullScreen: false, isOverflowing: false, printError: null },
     );
     // Button still visible (no hide), but flagged for disabled rendering.
     expect(result.showSelectionMode).toBe(true);
@@ -231,7 +231,7 @@ describe('resolveToolbarVisibility — curl-coordination disabled flag', () => {
   it('8. selectionModeDisabled=false when overflow disengages curl', () => {
     const result = resolveToolbarVisibility(
       { showSelectionMode: true, enablePageCurl: true },
-      { canDownload: false, canFullScreen: false, isOverflowing: true },
+      { canDownload: false, canFullScreen: false, isOverflowing: true, printError: null },
     );
     expect(result.showSelectionMode).toBe(true);
     expect(result.selectionModeDisabled).toBe(false);

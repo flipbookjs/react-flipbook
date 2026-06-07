@@ -1,0 +1,110 @@
+/* ============================================================
+   Load-bearing print-correctness rules — OUTSIDE @layer.
+   These MUST apply uniformly across the support window. Inside @layer,
+   pre-Cascade-5 browsers (Safari 14.0-15.3 / Chrome 87-98 / Firefox 78-96
+   — within our React-18 peerDep support window) would silently drop the
+   entire block, and window.print() would output the consumer's host page
+   instead of just the print sheet.
+   ============================================================ */
+
+/* Print sheet — hidden from screen, displayed only when printing.
+   Attaches to document.body so `@page` rules apply at root. */
+@media screen {
+  .fbjs-print-sheet { display: none; }
+}
+
+@media print {
+  /* Hide the rest of the page during print; show only the print sheet. */
+  body > :not(.fbjs-print-sheet) { display: none !important; }
+  .fbjs-print-sheet { display: block; }
+  .fbjs-print-page {
+    page-break-after: always;
+    max-width: 100%;
+    max-height: 100vh;
+    display: block;
+  }
+  .fbjs-print-page:last-child { page-break-after: auto; }
+}
+
+@page { margin: 0; }
+
+/* ============================================================
+   Stylistic rules — INSIDE @layer flipbook.
+   Banner chrome, spinner, forced-colors, reduced-motion. These degrade
+   gracefully (banner inherits consumer styling) in pre-Cascade-5 browsers
+   that drop the @layer block.
+   ============================================================ */
+@layer flipbook {
+
+/* ---- Inline print-error banner (rendered above the bottom toolbar shell) ---- */
+.fbjs-toolbar-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.fbjs-print-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background-color: var(--fbjs-toolbar-bg);
+  color: var(--fbjs-toolbar-fg);
+  border: 1px solid var(--fbjs-border);
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+}
+
+.fbjs-print-error__message {
+  flex: 1 1 auto;
+}
+
+.fbjs-print-error__dismiss {
+  flex: 0 0 auto;
+  width: 1.75rem;
+  height: 1.75rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 0.25rem;
+  color: var(--fbjs-toolbar-fg);
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.fbjs-print-error__dismiss:hover,
+.fbjs-print-error__dismiss:focus-visible {
+  background-color: color-mix(in srgb, var(--fbjs-fg) 8%, transparent);
+}
+
+/* ---- Forced-colors (Windows High Contrast) accessibility ---- */
+/* Under @media (forced-colors: active), browsers force-override colors —
+   transparent borders and CSS-custom-property backgrounds become invisible.
+   The CanvasText system color keyword always renders visibly. Without this rule
+   the print-error banner disappears entirely in High Contrast modes. */
+@media (forced-colors: active) {
+  .fbjs-print-error {
+    border: 1px solid CanvasText;
+  }
+  .fbjs-print-error__dismiss {
+    border: 1px solid CanvasText;
+  }
+  .fbjs-print-error__dismiss:focus-visible {
+    outline: 2px solid CanvasText;
+    outline-offset: 1px;
+  }
+}
+
+/* ---- Spinner icon (PrintButton when isPrinting) ---- */
+@keyframes fbjs-toolbar-spin { to { transform: rotate(360deg); } }
+
+.fbjs-toolbar__spinner {
+  animation: fbjs-toolbar-spin 0.8s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fbjs-toolbar__spinner { animation: none; }
+}
+
+} /* end @layer flipbook */

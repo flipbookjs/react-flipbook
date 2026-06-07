@@ -37,6 +37,8 @@
  * shallowly-compared object selector.
  */
 
+import type { FlipbookState } from '../core/flipbookReducer';
+
 export interface VisibilityProps {
   showPrint?: boolean;
   showDownload?: boolean;
@@ -63,6 +65,14 @@ export interface VisibilitySlice {
    *  provider's derived `isOverflowing` useMemo — NOT a reducer state field).
    *  Consumed by the curl-aware `showSelectionMode` refinement. */
   isOverflowing: boolean;
+  /** Current print-pipeline error (if any) — read from `state.printError`.
+   *  This field is a PASSENGER on the visibility slice: it is NOT consumed by
+   *  `resolveToolbarVisibility()` (which only computes `show*` booleans), it
+   *  is consumed directly by `<Toolbar>`'s JSX to gate `<PrintErrorBanner>`
+   *  rendering on `printError !== null && visibility.showPrint`. Bundling it
+   *  on the existing slice (rather than introducing a separate selector) keeps
+   *  Toolbar.tsx to a single `useFlipbookSelector` call. */
+  printError: FlipbookState['printError'];
 }
 
 export interface ResolvedVisibility {
