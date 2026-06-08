@@ -76,6 +76,17 @@ export class PdfjsSource implements PageSource {
     return this.pageSizes[index];
   }
 
+  /**
+   * Return the URL this source was constructed from, or `undefined` when
+   * constructed from `Uint8Array` bytes. Honors the optional
+   * `PageSource.getSourceUrl?()` contract.
+   */
+  getSourceUrl(): string | undefined {
+    if (typeof this.url === 'string') return this.url;
+    if (this.url instanceof URL) return this.url.toString();
+    return undefined;   // Uint8Array case
+  }
+
   async renderPage(
     index: number,
     scale: number,

@@ -42,6 +42,7 @@ import { useSelectionMode } from './hooks/useSelectionMode';
 import { usePrint, type PrintCallbacks } from './hooks/usePrint';
 import { usePrintErrorDismiss } from './hooks/usePrintErrorDismiss';
 import { devWarn } from './core/devWarn';
+import { sanitizeFilename } from './core/sanitizeFilename';
 import { increase, decrease } from './zoom/zoomingLevel';
 import { SpecialZoomLevel } from './zoom/SpecialZoomLevel';
 import { pageToSpreadIndex as findSpreadByPageIndex } from './core/computeSpreads';
@@ -208,6 +209,12 @@ interface FlipbookProviderProps {
   onPrintError?: (error: Error, info: { phase: 'too-large' | 'render' | 'blob' }) => void;
   onPrintAbort?: (info: { reason: 'unmount' | 'source-change' | 'user-cancel' }) => void;
 
+  /** Semantic document name — used as the download filename (sanitized).
+   *  See `FlipbookProps.documentName` JSDoc for the display-vs-filename
+   *  separation rationale. When omitted, the download falls back to URL
+   *  basename → `'document'`. */
+  documentName?: string;
+
   children?: ReactNode;
 }
 
@@ -234,6 +241,7 @@ export function FlipbookProvider({
   onPrintComplete,
   onPrintError,
   onPrintAbort,
+  documentName,
   children,
 }: FlipbookProviderProps) {
   // 1. Reducer
@@ -750,6 +758,15 @@ export function FlipbookProvider({
     };
   }, [onPrintStart, onPrintComplete, onPrintError, onPrintAbort]);
 
+  // Mirror `documentName` into a ref so the download action body can read the
+  // latest value without putting `documentName` in the action's deps array
+  // (the per-action contract from 6A keeps download's deps narrow to
+  // `[source]`). Pattern matches the 6F1 `printCallbacksRef` ref-mirror above.
+  const documentNameRef = useRef(documentName);
+  useIsomorphicLayoutEffect(() => {
+    documentNameRef.current = documentName;
+  }, [documentName]);
+
   const { print, cancelPrint } = usePrint({
     source,
     dispatch,
@@ -770,9 +787,79 @@ export function FlipbookProvider({
     dispatch({ type: 'CLEAR_PRINT_ERROR' });
   }, [dispatch]);
 
-  // Download stub — rotates on source change (per Decision 1 contract).
-  // 6F1 replaces only the print stub; download stays as a stub for now.
-  const download: () => void = useCallback(() => {}, [source]);
+  const download = useCallback((): void => {
+    const url = source.getSourceUrl?.();
+    // Symmetric with `canDownload = !!source.getSourceUrl?.()` — the action
+    // and the disabled-state derivation must agree on what counts as "no URL"
+    // (undefined OR empty string OR any other falsy result). A custom
+    // PageSource that returns '' would otherwise expose canDownload=false
+    // (button disabled) but still synthesize an anchor with href="" on a
+    // programmatic actions.download() call.
+    if (!url) {
+      devWarn(
+        '[flipbook] actions.download() called but no URL is available ' +
+        '(source.getSourceUrl?() returned undefined or empty). No-op. ' +
+        'Gate calls behind helpers.canDownload to avoid this warning.',
+      );
+      return;
+    }
+    // Filename derivation — tiered fallback:
+    //   1. documentName (explicit semantic prop)
+    //   2. URL basename — last segment of the URL pathname
+    //   3. 'document'
+    // All three tiers run through sanitizeFilename to ensure OS-friendliness.
+    // Tier-1 explicit name: only honored when it's a non-empty, non-whitespace
+    // string. `documentName=""` and `documentName="   "` should NOT short-circuit
+    // to a literal "document.pdf" (sanitizeFilename's empty-input fallback);
+    // they should fall through to tier-2 URL basename — that's the intent the
+    // consumer signaled by providing a URL in the first place.
+    const explicitName = (() => {
+      const raw = documentNameRef.current?.trim();
+      return raw && raw.length > 0 ? raw : undefined;
+    })();
+    const urlBaseName = (() => {
+      try {
+        // Anchor relative paths to localhost so URL parsing succeeds for both
+        // relative ('/docs/x.pdf') and absolute ('https://...') inputs.
+        // `http://localhost/` is the conventional placeholder base anchor —
+        // some URL parsers reject unusual hostnames (e.g., `http://_/`),
+        // so we use the universally-recognized localhost form.
+        const parsed = new URL(url, 'http://localhost/');
+        const lastSeg = parsed.pathname.split('/').pop();
+        if (!lastSeg || lastSeg.length === 0) return null;
+        // Decode percent-encoded characters so URLs like `/LDEO%20Annual.pdf`
+        // produce the clean filename `LDEO Annual.pdf` instead of `LDEO%20Annual.pdf`.
+        // Without this, browsers double-encode the literal `%` in the
+        // `a.download` value when saving, producing `LDEO%2520Annual.pdf` on
+        // disk. decodeURIComponent throws URIError on malformed percent-encoding
+        // (e.g., `%2G`); the catch falls back to the raw basename in that case.
+        try {
+          return decodeURIComponent(lastSeg);
+        } catch {
+          return lastSeg;
+        }
+      } catch {
+        return null;
+      }
+    })();
+    const baseName = explicitName ?? urlBaseName ?? 'document';
+    const filename = sanitizeFilename(baseName);
+    // Detached `<a>` — works without appendChild in all target browsers.
+    // target="_blank" + rel="noopener": for SAME-ORIGIN URLs the browser honors
+    // `download` and the new-tab target is a no-op (download proceeds in the
+    // background, no tab opens). For CROSS-ORIGIN URLs the browser ignores
+    // `download` and falls back to navigation — target="_blank" then ensures
+    // the navigation opens a NEW tab instead of replacing the flipbook view in
+    // the current tab. `noopener` is the standard security hardening for any
+    // user-initiated `target="_blank"` link (prevents the opened page from
+    // accessing `window.opener`).
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.click();
+  }, [source]);
 
   // ---- Actions object: useMemo so identity is stable across non-source-
   //      change renders. Every action ref above is stable except print/download
@@ -799,24 +886,18 @@ export function FlipbookProvider({
   ]);
 
   // ---- Helpers ----
-  // canFullScreen detected once at mount via SSR-safe check; canDownload is
-  // always false in 6A (6F enables via getSourceUrl). pageToSpreadIndex is
-  // the 1-indexed public helper — a thin validation wrapper over the
-  // 0-indexed internal `findSpreadByPageIndex` (computeSpreads.ts).
-  //
-  // The helper reads state via REFS (same pattern as `goToPage` above) so:
-  //   1. Consumers who cache `helpers.pageToSpreadIndex` get always-current
-  //      results — no stale closures.
-  //   2. The `helpers` useMemo deps narrow to [canFullScreen], which is
-  //      effectively constant after mount. So helpers identity is STABLE for
-  //      the provider's lifetime — fewer cascading snapshot rotations for
-  //      subscribers that read e.g. only `helpers.canDownload`.
-  //
-  // 6F will reintroduce a dep when it adds `canDownload` based on
-  // `getSourceUrl()` — at that point, helpers will rotate on source change,
-  // matching the action-stability contract.
+  // canDownload is a derived boolean keyed on `source` — recomputed when the
+  // source rotates, but the OUTPUT is just `true | false`. Naive inclusion of
+  // `source` in the `helpers` deps array below would rotate `helpers` identity
+  // (and embedded `pageToSpreadIndex`) on every source change — defeats the
+  // memo-stability characteristic for consumers using `React.memo` +
+  // `helpers.pageToSpreadIndex`. Splitting into two memos: `canDownload`
+  // recomputes per source; `helpers` only rotates when `canDownload`'s boolean
+  // VALUE flips (rare — only when source crosses URL-vs-Uint8Array boundary).
+  const canDownload = useMemo(() => !!source.getSourceUrl?.(), [source]);
+
   const helpers = useMemo<FlipbookHookHelpers>(() => ({
-    canDownload: false,   // 6F overwrites via getSourceUrl detection
+    canDownload,
     canFullScreen,
     pageToSpreadIndex: (pageNumber: number): number => {
       if (sourceStatusRef.current !== 'ready') return -1;
@@ -826,7 +907,7 @@ export function FlipbookProvider({
       // real spread index.
       return findSpreadByPageIndex(pageNumber - 1, spreadsRef.current);
     },
-  }), [canFullScreen]);   // narrow deps — pageToSpreadIndex reads live state via refs
+  }), [canFullScreen, canDownload]);   // narrow deps — pageToSpreadIndex reads live state via refs
 
   // ---- Curated hook state (the `state` field of FlipbookSnapshot / FlipbookHook) ----
   const hookState = useMemo<FlipbookHookState>(() => {

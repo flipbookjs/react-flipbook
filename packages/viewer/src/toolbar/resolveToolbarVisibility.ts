@@ -13,8 +13,9 @@
  *
  * Default rules per field:
  * - `showPrint`: true (always visible by default; consumer can hide)
- * - `showDownload`: `slice.canDownload` (false in 6A until 6F lands the URL
- *   detection in PdfjsSource; consumer can force-show with explicit `true`)
+ * - `showDownload`: `slice.canDownload` (value reflects whether the active
+ *   source exposes a URL via `getSourceUrl?()`; consumer can force-show or
+ *   force-hide with an explicit `true` / `false`)
  * - `showFullScreen`: `slice.canFullScreen` (false during SSR; true on
  *   browsers exposing the Fullscreen API; consumer can hide on supported
  *   browsers with explicit `false`)

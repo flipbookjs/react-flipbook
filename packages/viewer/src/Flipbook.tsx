@@ -76,6 +76,13 @@ export interface FlipbookProps extends VisibilityProps {
   /** Title rendered in the built-in toolbar's top bar. Suppressed when
    *  `compact={true}`. Ignored when `toolbar` is a custom ReactNode. */
   title?: ReactNode;
+  /** Semantic document name — used as the download filename (sanitized).
+   *  Distinct from `title` (which is display-only and may be ReactNode):
+   *  display and semantic identity are independent concerns. When omitted,
+   *  the download filename falls back to the URL's pathname basename, then
+   *  to `'document'`. Consumers wanting "toolbar title is also the filename"
+   *  should pass both `title` and `documentName` set to the same string. */
+  documentName?: string;
   /** Optional custom fullscreen target resolver. Receives the viewer's
    *  root element; returns the element to fullscreen, or `null`/`undefined`
    *  to fall back to the root. See `FlipbookProviderProps` for full
@@ -132,6 +139,7 @@ export function Flipbook({
   toolbar = true,
   compact,
   title,
+  documentName,
   showPrint,
   showDownload,
   showFullScreen,
@@ -296,6 +304,7 @@ export function Flipbook({
       onPrintComplete={onPrintComplete}
       onPrintError={onPrintError}
       onPrintAbort={onPrintAbort}
+      documentName={documentName}
     />
   );
 }

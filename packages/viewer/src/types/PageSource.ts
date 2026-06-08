@@ -22,6 +22,57 @@ export interface PageSource {
   getPageSize(index: number): { width: number; height: number };
 
   /**
+   * Return the source URL when this `PageSource` was loaded from one — i.e., a
+   * string URL or a `URL` object passed to the implementation's constructor.
+   * Return `undefined` for in-memory sources (e.g., `PdfjsSource(Uint8Array)`)
+   * or for implementations that don't expose a URL.
+   *
+   * Used by the toolbar's `<DownloadButton>` to gate the disabled state
+   * (`helpers.canDownload = !!source.getSourceUrl?.()`) and to synthesize the
+   * download via `<a href={url} download={filename}>`. Cross-origin HTTP(S)
+   * URLs will navigate the browser instead of downloading — that's a browser
+   * limitation (see "URL validation" note below for the spec details), not
+   * a contract violation; sources may still return such URLs.
+   *
+   * The method is OPTIONAL — implementations that don't implement it leave
+   * the download button disabled. Backward-compatible: existing
+   * `PageSource` impls continue to compile without changes.
+   *
+   * **Implementations are responsible for URL validation.** The URL returned
+   * here is passed unchanged to `<a href={url}>`. Implementations that
+   * construct sources from user-supplied input (e.g., a CMS storing
+   * user-uploaded PDF URLs) MUST validate the URL scheme + host at
+   * construction time before letting it reach `getSourceUrl()`. The library
+   * does NOT filter `javascript:`, `data:text/html`, or other potentially
+   * hostile schemes — that defense belongs at the source-construction
+   * boundary, not in the consumer-facing download action. The returned URL
+   * should ideally be SAME-ORIGIN (cross-origin URLs degrade to new-tab
+   * navigation — per the HTML spec, the `<a download>` attribute is only
+   * honored for same-origin URLs or `blob:` / `data:` schemes; CORS does
+   * not change this). Local-file URLs (`file://`) are blocked by browser
+   * security policy regardless of what this method returns.
+   *
+   * **Return only well-formed, non-whitespace URL strings.** The library uses
+   * string truthiness (`!!url`) for the `canDownload` derivation, so returning
+   * `'   '` or other whitespace-only strings will enable the download button
+   * but produce a broken click (browser parses whitespace-only `href` as the
+   * empty URL, which resolves to the current page URL). Return `undefined`
+   * (NOT an empty / whitespace-only string) when the source has no URL.
+   *
+   * **SSR-safety contract.** This method is called during the provider's
+   * render-phase `useMemo` (the `canDownload` derivation), which runs both
+   * on the server and on the client. Implementations MUST NOT touch
+   * `window`, `document`, `localStorage`, `navigator`, or other browser-only
+   * globals inside the method body. Reading from already-stored instance
+   * fields (set during construction, where the caller is responsible for
+   * SSR-safety) is the recommended pattern; see `PdfjsSource.getSourceUrl()`
+   * for the canonical implementation that reads `this.url` set in the
+   * constructor. (The `URL` constructor and `URL.prototype.toString` ARE
+   * available in Node and are SSR-safe.)
+   */
+  getSourceUrl?(): string | undefined;
+
+  /**
    * Render a page to a canvas at the given scale.
    * Returns HTMLCanvasElement (not ImageBitmap — see hard-problems #2).
    *
