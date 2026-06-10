@@ -1,0 +1,94 @@
+@layer flipbook {
+
+.fbjs-thumbnail-panel {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 200ms ease-out;
+  background-color: var(--fbjs-bg);
+  border-top: 1px solid var(--fbjs-border);
+}
+
+.fbjs-thumbnail-panel[data-open="true"] {
+  max-height: 14rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fbjs-thumbnail-panel {
+    transition: none;
+  }
+}
+
+.fbjs-thumbnail-panel__scroll {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  overflow-x: auto;
+  overflow-y: visible;
+  height: 14rem;
+  box-sizing: border-box;
+  /* Smooth horizontal scroll without snap (snap fights virtualization) */
+  scroll-behavior: smooth;
+}
+
+.fbjs-thumbnail-button {
+  flex: 0 0 auto;
+  height: 100%;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  color: var(--fbjs-fg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  /* Width computed inline from aspect-ratio */
+  /* Hover / current-page indicator uses outline + offset so the ring sits
+     OUTSIDE the canvas with breathing room — borders would touch the canvas
+     edge-to-edge, visually merging into it. Outline also doesn't take
+     layout space, so adjacent buttons don't shift when state changes. */
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  /* Kill iOS 300ms tap delay + the gray tap-flash. Matches the 6B toolbar
+     buttons' touch-ergonomics. Without these, mobile users experience a
+     300ms lag on every thumbnail tap (iOS heuristic for distinguishing tap
+     from double-tap-to-zoom). */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.fbjs-thumbnail-button:not([aria-current="page"]):hover:not([aria-disabled="true"]) {
+  outline-color: var(--fbjs-border);
+}
+
+.fbjs-thumbnail-button[aria-current="page"] {
+  outline-color: var(--fbjs-fg);
+}
+
+.fbjs-thumbnail-button__canvas-host {
+  flex: 1;
+  display: block;
+  position: relative;
+  background-color: color-mix(in srgb, var(--fbjs-fg) 5%, transparent);
+  border-radius: 0.125rem;
+  overflow: hidden;
+}
+
+.fbjs-thumbnail-button__canvas-host canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.fbjs-thumbnail-button__page-number {
+  font-size: 0.75rem;
+  color: var(--fbjs-fg-muted);
+  /* Tabular nums for alignment when scrolling fast — numbers don't jitter
+     horizontally as digits change (1, 2, 3, ... 10, 11, ...). Matches
+     the 6C toolbar readout font-variant-numeric setting. */
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+} /* end @layer flipbook */

@@ -1,0 +1,246 @@
+/*
+ * Toolbar styling — CMS-aligned default chrome. Uses the `--fbjs-*` variables
+ * from theme.css; consumers re-skin by overriding those variables without
+ * touching these rules.
+ *
+ * Visual contract (matches the CMS reference design):
+ *   - Rounded white container (~8px corners) with a subtle 1px border + soft
+ *     drop shadow. Reads as a "card" floating above the viewer surface.
+ *   - 40×40 icon-only buttons with 24px stroke icons drawn in a lighter gray
+ *     (`--fbjs-toolbar-fg-muted`) so they read as chrome, not content. Hover
+ *     darkens the icon to the foreground color and adds a faint background tint.
+ *   - Tabular-numerals readouts at the same 40px height as buttons.
+ *
+ * Layout primitives:
+ *   - `.fbjs-toolbar` is the rounded card. Bare children flow left-to-right
+ *     with a small gap — fine for simple consumer compositions.
+ *   - `.fbjs-toolbar__section--left/--center/--right` are OPTIONAL wrapper
+ *     divs that distribute children across three slots using flex grow on
+ *     left + right (center hugs its content). The CMS reference and 6C's
+ *     built-in `<Toolbar>` both use this pattern. Sibling sections get a
+ *     1px divider via `.fbjs-toolbar__section + .fbjs-toolbar__section`.
+ *   - `.fbjs-toolbar__group` is a finer-grained wrapper inside a section
+ *     for visually clustering 2-3 related buttons (e.g., zoom-out + readout
+ *     + zoom-in). Sibling groups inside a section get a 1px divider via
+ *     the same adjacent-sibling pattern.
+ *   - `.fbjs-toolbar__bar--top/--bottom` are reserved for 6C's optional
+ *     two-bar variant (title + actions on top, controls below). 6B's CSS
+ *     declares them but ships no styling beyond `display: flex; width: 100%`
+ *     so 6C can layer specifics.
+ *
+ * All rules below live in the `flipbook` cascade layer — see theme.css
+ * file-header for the consumer-override rationale.
+ */
+
+@layer flipbook {
+
+.fbjs-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-wrap: wrap;          /* graceful overflow on narrow widths — sections wrap to a 2nd row before clipping */
+  row-gap: 0.25rem;
+  padding: 0.5rem 0.75rem;
+  background-color: var(--fbjs-toolbar-bg);
+  color: var(--fbjs-toolbar-fg);
+  border: 1px solid var(--fbjs-border);
+  border-radius: 0.5rem;
+  box-shadow: var(--fbjs-toolbar-shadow);
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 0.875rem;
+  /* Don't let toolbar focus rings bleed outside the rounded card */
+  position: relative;
+  /* Establish the container for the responsive @container rules below. The
+     toolbar IS the container we query — its OWN width drives layout decisions.
+     Works correctly when the toolbar is nested in a narrow sidebar even if
+     the page viewport is wide. */
+  container-type: inline-size;
+  container-name: fbjs-toolbar;
+  /* Constrain max-width so the toolbar never forces page horizontal-scroll
+     even at extreme small widths. */
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* Three-slot distribution. Consumers/6C wrap children in these divs. */
+.fbjs-toolbar__section {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0 0.5rem;
+}
+.fbjs-toolbar__section--left {
+  flex: 1 1 0;
+  justify-content: flex-start;
+  padding-left: 0;
+}
+.fbjs-toolbar__section--center {
+  flex: 0 0 auto;
+  justify-content: center;
+}
+.fbjs-toolbar__section--right {
+  flex: 1 1 0;
+  justify-content: flex-end;
+  padding-right: 0;
+}
+/* Divider between sibling sections (the CMS-reference vertical lines). */
+.fbjs-toolbar__section + .fbjs-toolbar__section {
+  border-left: 1px solid var(--fbjs-border);
+}
+
+/* Reserved for 6C's optional two-bar wrapper variant — see file-header
+   comment. 6B ships minimal styling so 6C can layer its own without
+   conflict. */
+.fbjs-toolbar__bar--top,
+.fbjs-toolbar__bar--bottom {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.fbjs-toolbar__group {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+  padding: 0 0.5rem;
+}
+.fbjs-toolbar__group + .fbjs-toolbar__group {
+  border-left: 1px solid var(--fbjs-border);
+}
+
+.fbjs-toolbar__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0.5rem;
+  background-color: transparent;
+  color: var(--fbjs-toolbar-fg-muted);
+  border: 1px solid transparent;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+  /* Touch ergonomics: kill iOS 300ms tap delay + remove the gray flash */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.fbjs-toolbar__button:hover:not([aria-disabled="true"]) {
+  background-color: color-mix(in srgb, var(--fbjs-fg) 6%, transparent);
+  color: var(--fbjs-toolbar-fg);
+}
+
+.fbjs-toolbar__button:active:not([aria-disabled="true"]) {
+  background-color: color-mix(in srgb, var(--fbjs-fg) 12%, transparent);
+  color: var(--fbjs-toolbar-fg);
+}
+
+/* aria-disabled (NOT native HTML disabled) so the button stays focusable —
+   roving-tabindex requires every registered part to be reachable by Tab and
+   arrow keys. Click handlers guard internally; CSS handles the visual state.
+   See Section 4.2 Known Limitations for the architectural rationale. */
+.fbjs-toolbar__button[aria-disabled="true"] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.fbjs-toolbar__button svg {
+  display: block;
+}
+
+.fbjs-toolbar__readout {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 0.5rem;
+  height: 2.5rem;
+  min-width: 3.5rem;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--fbjs-toolbar-fg);
+}
+
+.fbjs-toolbar__title {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 0.5rem;
+  font-weight: 500;
+  color: var(--fbjs-toolbar-fg);
+}
+
+.fbjs-toolbar__readout--page {
+  min-width: 6rem;
+}
+
+.fbjs-toolbar__readout--zoom {
+  min-width: 3.5rem;
+}
+
+/* =====================================================================
+   Responsive behavior
+   =====================================================================
+   Two tiers:
+   1. `@media (pointer: coarse)` — touch-only devices (phones, tablets in
+      touch mode, kiosks). Bump tap targets to 44px to meet Apple HIG
+      minimum + Material 48dp recommendation. Applies regardless of
+      viewport size — a 1024px tablet in landscape still gets the bigger
+      buttons because the input device is touch.
+   2. `@container fbjs-toolbar (max-width: …)` — toolbar-width-driven
+      adjustments. The toolbar is the container (declared above via
+      `container-type: inline-size`); its OWN width drives these rules.
+      Works correctly when the toolbar is nested in a narrow sidebar even
+      if the page viewport is wide.
+
+   IMPORTANT — `display: none` is NEVER used to hide PARTS responsively:
+   that would break roving-tabindex (hidden parts stay registered in the
+   shell's partsRef but are unfocusable, so ArrowRight from the last
+   visible part lands on a hidden off-screen element). Responsive part
+   HIDING is React-level — consumers use 6C's `<Toolbar showXxx={isWide}>`
+   props with their own media-query hook. The responsive CSS below only
+   resizes / shrinks what's visible, never removes parts.
+*/
+
+@media (pointer: coarse) {
+  .fbjs-toolbar__button {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+  .fbjs-toolbar__readout {
+    height: 2.75rem;
+  }
+}
+
+@container fbjs-toolbar (max-width: 480px) {
+  /* Narrow toolbar — shrink readout min-widths so "Page 5 of 12" can render
+     as "5/12"-like compact form via a consumer-provided label override OR
+     via the 6C-time replacement of the readout part with a more compact
+     variant. 6B's PageReadout still renders the full "Page X of Y" string;
+     consumers wanting a compact form pass a `pageReadout` LABELS override
+     in v0.2 OR fork the part. */
+  .fbjs-toolbar__readout--page {
+    min-width: 3rem;
+  }
+  .fbjs-toolbar__readout--zoom {
+    min-width: 2.75rem;
+  }
+  /* Tighter section padding so 3 sections fit. */
+  .fbjs-toolbar__section {
+    padding: 0 0.25rem;
+  }
+  /* Tighter group padding too. */
+  .fbjs-toolbar__group {
+    padding: 0 0.25rem;
+  }
+}
+
+@container fbjs-toolbar (max-width: 360px) {
+  /* Very narrow — drop the section dividers; the visual separation comes
+     from the wrap. (At this width the toolbar has typically already
+     wrapped to 2 rows via flex-wrap.) */
+  .fbjs-toolbar__section + .fbjs-toolbar__section,
+  .fbjs-toolbar__group + .fbjs-toolbar__group {
+    border-left: none;
+  }
+}
+
+} /* end @layer flipbook */
