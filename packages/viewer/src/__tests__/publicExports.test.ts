@@ -21,6 +21,13 @@ import type {
   PdfjsSourceOptions,
   Spread,
   ToolbarProps,
+  // Step 6A hook types (published Step 6G)
+  FlipbookHook,
+  FlipbookHookBase,
+  FlipbookHookState,
+  FlipbookHookActions,
+  FlipbookHookHelpers,
+  FlipbookSnapshot,
 } from '../index';
 
 // Expected runtime exports — authoritative list. If something is added or
@@ -33,6 +40,10 @@ const EXPECTED_RUNTIME_EXPORTS = [
   'ThumbnailPanel',
   'Toolbar',
   'configurePdfWorker',
+  'shallowEqual',
+  'useFlipbook',
+  'useFlipbookActions',
+  'useFlipbookSelector',
 ].sort();
 
 describe('public API exports', () => {
@@ -98,6 +109,57 @@ describe('public API exports', () => {
     expect(propsWithScale.defaultScale).toBe('fit-width');
     expect(toolbarProps.compact).toBe(true);
     expect(toolbarProps.title).toBe('Doc');
+
+    // Step 6A hook types — exercise each via a typed annotation. The runtime
+    // values are placeholder shapes mirroring SSR_STATE (useFlipbook.ts:197) —
+    // the test compiles iff each type is public AND the construction matches
+    // the actual field set. Annotation-only — these don't need assertions, but
+    // they DO need to type-check.
+    const _hookState: FlipbookHookState = {
+      pageNumber: 1, totalPages: 0,
+      spreadIndex: 0, spreadCount: 0,
+      viewMode: 'auto', resolvedViewMode: 'single',
+      zoomMode: 'fit-page', customScale: 1, effectiveScale: 1,
+      isOverflowing: false, isFullScreen: false, theme: 'light',
+      interactionMode: 'select', isPrinting: false, printError: null,
+      thumbnailsOpen: false,
+    };
+    const _hookActions: FlipbookHookActions = {
+      next: () => {}, previous: () => {}, goToPage: () => {},
+      goToFirst: () => {}, goToLast: () => {},
+      zoomIn: () => {}, zoomOut: () => {}, setZoom: () => {},
+      fitPage: () => {}, fitWidth: () => {},
+      enterFullScreen: () => Promise.resolve(),
+      exitFullScreen: () => Promise.resolve(),
+      toggleFullScreen: () => Promise.resolve(),
+      setTheme: () => {}, toggleTheme: () => {},
+      setInteractionMode: () => {},
+      print: () => Promise.resolve(),
+      download: () => {},
+      setThumbnailsOpen: () => {}, toggleThumbnails: () => {},
+      dismissPrintError: () => {}, cancelPrint: () => {},
+    };
+    const _hookHelpers: FlipbookHookHelpers = {
+      canDownload: false, canFullScreen: false, pageToSpreadIndex: () => -1,
+    };
+    const _hookBase: FlipbookHookBase = {
+      state: _hookState, actions: _hookActions, helpers: _hookHelpers,
+    };
+    // FlipbookHook is the discriminated union; satisfying it via the 'loading'
+    // branch is the simplest construction.
+    const _hook: FlipbookHook = {
+      ..._hookBase, status: 'loading', source: null, error: null,
+    };
+    const _snapshot: FlipbookSnapshot = {
+      state: _hookState, actions: _hookActions, helpers: _hookHelpers,
+      status: 'loading', source: null, error: null,
+    };
+    void _hook; void _snapshot;
+
+    // FlipbookProps.documentName?: string — Step 6F2 prop. Exercise via the
+    // existing typed-prop-object pattern.
+    const propsWithDocumentName: FlipbookProps = { documentName: 'Annual Report' };
+    expect(propsWithDocumentName.documentName).toBe('Annual Report');
   });
 
   it('PageSource is a structural interface', () => {
@@ -111,5 +173,13 @@ describe('public API exports', () => {
       dispose: () => {},
     };
     expect(typeof source.init).toBe('function');
+
+    // Step 6F2 optional method — implementations that opt in to URL-based
+    // download return a string; opt-out implementations omit the method.
+    const sourceWithUrl: PageSource = {
+      ...source,
+      getSourceUrl: () => '/doc.pdf',
+    };
+    expect(sourceWithUrl.getSourceUrl?.()).toBe('/doc.pdf');
   });
 });

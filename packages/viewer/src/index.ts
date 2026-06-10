@@ -36,3 +36,19 @@ export { configurePdfWorker } from './adapters/configurePdfWorker';
 // Zoom (Step 5)
 export { SpecialZoomLevel } from './zoom/SpecialZoomLevel';
 export type { DefaultScale } from './zoom/types';
+
+// Hook surface (Step 6A — published Step 6G)
+export {
+  useFlipbook,
+  useFlipbookSelector,
+  useFlipbookActions,
+  shallowEqual,
+} from './hooks/useFlipbook';
+export type {
+  FlipbookHook,
+  FlipbookHookBase,
+  FlipbookHookState,
+  FlipbookHookActions,
+  FlipbookHookHelpers,
+  FlipbookSnapshot,
+} from './hooks/useFlipbook';
