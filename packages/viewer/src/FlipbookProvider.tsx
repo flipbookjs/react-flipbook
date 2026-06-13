@@ -131,6 +131,12 @@ interface FlipbookProviderProps {
    *  mount; subsequent prop changes are ignored (matches `defaultScale`'s
    *  uncontrolled semantics). 6C surfaces this as a `<Flipbook>` prop. */
   initialTheme?: 'light' | 'dark';
+  /** Seed the reducer's initial `interactionMode` field. Default 'select'.
+   *  Read once at mount via `createInitialState`'s 4th parameter; subsequent
+   *  prop changes are ignored (matches the `initialTheme` uncontrolled pattern).
+   *  `1.0.0` surfaces this as a `<Flipbook>` prop; runtime changes
+   *  go via `actions.setInteractionMode()`. */
+  initialInteractionMode?: 'select' | 'pan';
   /** Called on every runtime theme change after `setTheme` / `toggleTheme`
    *  dispatches. NOT called when the reducer is seeded with `initialTheme`
    *  on mount — `onThemeChange` is for runtime transitions only. The new
@@ -178,14 +184,6 @@ interface FlipbookProviderProps {
    *  low-level/test consumption of `<FlipbookProvider>` that wants no
    *  panel slot at all. */
   thumbnailsNode?: ReactNode | null;
-  /** Optional test/integration children mounted inside the full context
-   *  stack (Flipbook + Store + PageRegistry) but OUTSIDE the visible
-   *  `.fbjs-container` div, so they have access to all the public hooks
-   *  (`useFlipbook`, `useFlipbookSelector`, `useFlipbookActions`,
-   *  `useFlipbookContext`) without interfering with the viewer UI.
-   *  `Flipbook.tsx` does NOT pass children; this is for renderHook-based
-   *  tests in Phase 7 and for advanced consumers who need to render an
-   *  ad-hoc component alongside the viewer with shared state. */
 
   /** Hard ceiling for streaming print render. Default 100 (applied at the
    *  provider's destructure). See `FlipbookProps.printMaxPages` for the
@@ -215,6 +213,15 @@ interface FlipbookProviderProps {
    *  basename → `'document'`. */
   documentName?: string;
 
+  /** Optional children mounted inside the provider context. Public — use this
+   *  to mount effect-host components that need to call `useFlipbook` /
+   *  `useFlipbookActions` / `useFlipbookSelector` from inside provider scope.
+   *  Those hooks throw outside provider context (see `useFlipbook.ts`), so
+   *  external-state sync patterns (e.g., a `<ThemeSyncer>` that mirrors an
+   *  app-level theme store into the viewer) require a child mounted via this
+   *  prop. See MIGRATION.md §7.2 / §9.2 for the canonical patterns. Rendered
+   *  at FlipbookProvider.tsx:1089 inside all contexts but outside the
+   *  `.fbjs-container` viewport div. */
   children?: ReactNode;
 }
 
@@ -227,6 +234,7 @@ export function FlipbookProvider({
   enablePageCurl = false,
   defaultScale = 'fit-page',
   initialTheme = 'light',
+  initialInteractionMode = 'select',
   onThemeChange,
   getFullScreenTarget,
   onEnterFullScreen,
@@ -250,7 +258,7 @@ export function FlipbookProvider({
   const [state, dispatch] = useReducer(
     flipbookReducer,
     undefined,
-    () => createInitialState(viewMode ?? 'auto', defaultScale, initialTheme),
+    () => createInitialState(viewMode ?? 'auto', defaultScale, initialTheme, initialInteractionMode),
   );
 
   const onThemeChangeRef = useRef(onThemeChange);

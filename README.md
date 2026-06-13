@@ -46,7 +46,7 @@ Built for product documentation portals, magazine + brochure CMSes, e-book apps,
 Install the package and its peer dependencies:
 
 ```bash
-npm install @flipbookjs/react-viewer@0.1.0-alpha.1 pdfjs-dist react react-dom
+npm install @flipbookjs/react-viewer@1.0.0 pdfjs-dist react react-dom
 ```
 
 Render the viewer:

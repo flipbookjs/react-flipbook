@@ -1,6 +1,6 @@
 'use client';
 
-import { isValidElement, type ReactNode, useMemo, useRef } from 'react';
+import { isValidElement, type ReactNode, useMemo } from 'react';
 import type { PageSource } from './types/PageSource';
 import type { DefaultScale } from './zoom/types';
 import { PdfjsSource } from './adapters/PdfjsSource';
@@ -8,7 +8,17 @@ import { FlipbookProvider } from './FlipbookProvider';
 import { Toolbar } from './toolbar/Toolbar';
 import { ThumbnailPanel } from './thumbnails/ThumbnailPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { devWarn } from './core/devWarn';
 import type { VisibilityProps } from './toolbar/resolveToolbarVisibility';
+
+// Module-level once-per-app guard for the single-ReactNode toolbar
+// position-change deprecation warn (added in 1.0.0 when the default
+// flipped from BOTTOM in the 0.1.0-alpha.1 cut to TOP). Lives at module scope so re-renders
+// + multi-instance apps don't double-warn. Reset by HMR / full page
+// reload. Production stays cost-free: the entire guarded block is gated
+// on `process.env.NODE_ENV !== 'production'` at the call site below, so
+// bundlers DCE the Set.has / Set.add calls along with `devWarn`.
+const warnedDeprecations = new Set<string>();
 
 /**
  * Duck-type guard for the slot-object variant of `toolbar`. Distinguishes
@@ -28,7 +38,11 @@ function isSlotObject(value: unknown): value is { top?: ReactNode; bottom?: Reac
   );
 }
 
-export interface FlipbookProps extends VisibilityProps {
+// Common to both variants. Every field that was on the 0.1.0-alpha.1 `FlipbookProps`
+// (other than the toolbar-variant-specific `toolbar`, `compact`, `title`) lives
+// here unchanged with its existing JSDoc. NEW in 1.0.0: `initialInteractionMode`,
+// `thumbnailSize`, `children`.
+interface FlipbookCommonProps {
   url?: string;
   source?: PageSource;
   viewMode?: 'single' | 'dual-cover' | 'auto';
@@ -36,7 +50,13 @@ export interface FlipbookProps extends VisibilityProps {
   renderError?: (error: Error) => ReactNode;
   renderLoading?: () => ReactNode;
   /** Enable page-curl animation on pointer/wheel interactions. Defaults to false (opt-in).
-   *  Only active when resolvedViewMode === 'dual-cover'. Curl engine lazy-loaded. */
+   *  Only active when resolvedViewMode === 'dual-cover'. Curl engine lazy-loaded.
+   *
+   *  Document-behavior prop — available on BOTH built-in and custom toolbar variants
+   *  (declared on FlipbookCommonProps, NOT only on VisibilityProps). The toolbar's
+   *  selection-mode button reads it for curl-aware disabled state; the document's
+   *  curl-engine reads it for chunk preload + dual-cover gesture handling. Both
+   *  concerns are independent of toolbar variant. */
   enablePageCurl?: boolean;
   /** Initial zoom mode or scale. String values map to fit modes; numeric values map
    *  to custom scale (clamped to [0.1, 4] at the factory boundary per architectural
@@ -54,28 +74,6 @@ export interface FlipbookProps extends VisibilityProps {
    *  Not called for the initial seed. The new theme is passed as the
    *  argument. Common use: analytics + persistence. */
   onThemeChange?: (theme: 'light' | 'dark') => void;
-  /** Controls the toolbar. Four forms:
-   *  - `true | undefined` (default) → built-in `<Toolbar>` renders top + bottom bars
-   *  - `false` → no chrome
-   *  - `ReactNode` (truthy, non-boolean, not a slot object) → consumer's JSX renders
-   *    in the BOTTOM slot only; top slot is null. Use for single-bar custom chrome.
-   *  - `{ top?: ReactNode; bottom?: ReactNode }` → consumer's JSX renders in BOTH
-   *    slots independently. Either slot may be omitted. Use for two-bar custom chrome
-   *    that wants to live in the library's default DOM positions (above/below the
-   *    container) without re-implementing the layout.
-   *
-   *  When a non-boolean form is supplied (single ReactNode OR slot object), the 6
-   *  `show*` visibility props + `compact` + `title` are inert — the consumer's JSX
-   *  dictates rendering. A dev-mode warning fires when the conflict is detected
-   *  (silent in production builds). */
-  toolbar?: boolean | ReactNode | { top?: ReactNode; bottom?: ReactNode };
-  /** When `true`, suppresses the built-in toolbar's top bar (title +
-   *  output buttons). Bottom bar still renders. Ignored when `toolbar` is
-   *  a custom ReactNode. */
-  compact?: boolean;
-  /** Title rendered in the built-in toolbar's top bar. Suppressed when
-   *  `compact={true}`. Ignored when `toolbar` is a custom ReactNode. */
-  title?: ReactNode;
   /** Semantic document name — used as the download filename (sanitized).
    *  Distinct from `title` (which is display-only and may be ReactNode):
    *  display and semantic identity are independent concerns. When omitted,
@@ -120,7 +118,97 @@ export interface FlipbookProps extends VisibilityProps {
   onPrintError?: (error: Error, info: { phase: 'too-large' | 'render' | 'blob' }) => void;
   /** Fires when an in-flight print is aborted by unmount or source change. */
   onPrintAbort?: (info: { reason: 'unmount' | 'source-change' | 'user-cancel' }) => void;
+
+  // ---- NEW in 1.0.0 ----
+
+  /** Initial interaction mode. `'pan'` for hand-drag panning, `'select'` for
+   *  text selection (default). Uncontrolled — to change at runtime, dispatch
+   *  `actions.setInteractionMode()`. Mirrors the `initialTheme` pattern. */
+  initialInteractionMode?: 'select' | 'pan';
+  /** Bounding-box width of built-in thumbnail items. When omitted, the panel
+   *  preserves 0.1.0-alpha.1 sizing (per-page `pageWidth × 0.2`). When supplied,
+   *  tokens map to 360 / 480 / 720 px; an explicit number is the literal
+   *  pixel width for responsive layouts. Height per item derives from each
+   *  page's actual aspect ratio. */
+  thumbnailSize?: 'small' | 'default' | 'large' | number;
+  /** Optional children mounted inside the provider context, alongside the
+   *  viewer chrome. Use this to mount effect-host components that call
+   *  `useFlipbook` / `useFlipbookActions` / `useFlipbookSelector` from
+   *  inside provider scope — those hooks throw outside provider context, so
+   *  external-state sync patterns (e.g., a `<ThemeSyncer>` that mirrors an
+   *  app-level theme store into the viewer) require a child mounted via
+   *  this prop. See MIGRATION.md §7.2 / §9.2 for the canonical patterns. */
+  children?: ReactNode;
 }
+
+/** Slot-object shape for `toolbar`. At least one of `top` / `bottom` must be
+ *  supplied — the empty-object form `toolbar={{}}` is rejected at compile time
+ *  because it has no rendering effect and would silently fall through to the
+ *  single-ReactNode branch at runtime. */
+type ToolbarSlots =
+  | { top: ReactNode; bottom?: ReactNode }
+  | { top?: ReactNode; bottom: ReactNode };
+
+/** Built-in toolbar variant: `show*` + `compact` + `title` are meaningful.
+ *  `null` is included alongside `boolean` because the runtime treats
+ *  `toolbar == null` as built-in (Flipbook.tsx slot-dispatch case 2). */
+interface FlipbookBuiltinToolbarProps extends FlipbookCommonProps, VisibilityProps {
+  /** Controls the toolbar. Three forms (built-in variant):
+   *  - `true | undefined` (default) → built-in `<Toolbar>` renders top + bottom bars
+   *  - `null` → treated as undefined at runtime; built-in toolbar renders
+   *  - `false` → no chrome
+   *
+   *  For consumer-supplied JSX (single ReactNode or slot object), use the
+   *  `FlipbookCustomToolbarProps` variant (declared below). The TypeScript
+   *  discriminator routes the call to that variant when `toolbar` is anything
+   *  other than `boolean | null | undefined`. */
+  toolbar?: boolean | null;
+  /** When `true`, suppresses the built-in toolbar's top bar (title +
+   *  output buttons). Bottom bar still renders. */
+  compact?: boolean;
+  /** Title rendered in the built-in toolbar's top bar. Suppressed when
+   *  `compact={true}`. */
+  title?: ReactNode;
+}
+
+/** Custom toolbar variant: a non-null, non-boolean `ReactNode` OR a slot
+ *  object. The `show*` / `compact` / `title` props are forbidden here at
+ *  compile time — they're inert with custom chrome and combining them was
+ *  a known dev-time footgun in the 0.1.0-alpha.1 pre-release.
+ *
+ *  `enablePageCurl` is NOT marked `never` — it controls document curl-engine
+ *  behavior (lazy chunk preload, dual-cover gesture handling), independent
+ *  of toolbar variant. Custom-toolbar consumers may still want curl behavior. */
+interface FlipbookCustomToolbarProps extends FlipbookCommonProps {
+  /** Custom toolbar JSX. Three forms:
+   *  - **Single `ReactNode`** → renders in the **TOP slot** (bottom slot is null).
+   *    Changed in 1.0.0 from BOTTOM-only (the 0.1.0-alpha.1 behavior). A dev-mode warning fires
+   *    once per app to flag the position change; use the explicit slot form
+   *    below to opt into the bottom slot deterministically. (Production
+   *    builds are silent — the warn is DCE-stripped.)
+   *  - **`{ top: ReactNode; bottom?: ReactNode }`** → top + optional bottom slot.
+   *  - **`{ top?: ReactNode; bottom: ReactNode }`** → optional top + bottom slot.
+   *
+   *  At least one of `top` / `bottom` must be supplied — `toolbar={{}}` is
+   *  rejected at compile time because it would silently fall through to the
+   *  single-ReactNode branch (where `{}` would render as an invalid React child). */
+  toolbar:
+    | Exclude<ReactNode, boolean | null | undefined>
+    | ToolbarSlots;
+  showZoom?: never;
+  showNavigation?: never;
+  showThumbnails?: never;
+  showFullScreen?: never;
+  showSelectionMode?: never;
+  showPrint?: never;
+  showDownload?: never;
+  compact?: never;
+  title?: never;
+  // `enablePageCurl` deliberately NOT in the `never` block — see the
+  // interface JSDoc above for the document-behavior rationale.
+}
+
+export type FlipbookProps = FlipbookBuiltinToolbarProps | FlipbookCustomToolbarProps;
 
 export function Flipbook({
   url,
@@ -132,6 +220,7 @@ export function Flipbook({
   enablePageCurl = false,
   defaultScale = 'fit-page',
   initialTheme = 'light',
+  initialInteractionMode = 'select',
   onThemeChange,
   getFullScreenTarget,
   onEnterFullScreen,
@@ -140,6 +229,8 @@ export function Flipbook({
   compact,
   title,
   documentName,
+  thumbnailSize,
+  children,
   showPrint,
   showDownload,
   showFullScreen,
@@ -171,51 +262,13 @@ export function Flipbook({
     );
   }
 
-  // Dev-warn when `toolbar` is a non-boolean form (single ReactNode OR slot
-  // object) combined with any built-in-only prop. Visibility props + compact
-  // + title are inert when the consumer dictates the chrome via custom JSX.
-  // Silent in production (NODE_ENV-replaced).
-  //
-  // Deduplication contract: warn once per CONFLICT WINDOW. The first render
-  // that detects a conflict fires the warn; subsequent renders that still see
-  // the conflict stay silent (warnedRef stays true). When the consumer
-  // resolves the conflict, warnedRef resets — so if the consumer re-introduces
-  // the conflict later in the dev session, the warn fires again. Matches
-  // iterative dev ergonomics without spamming.
-  const warnedRef = useRef(false);
-  if (process.env.NODE_ENV !== 'production') {
-    const isCustomToolbar = toolbar !== true && toolbar !== false && toolbar != null;
-    const hasBuiltInOnlyProps = (
-      compact !== undefined ||
-      title !== undefined ||
-      showPrint !== undefined ||
-      showDownload !== undefined ||
-      showFullScreen !== undefined ||
-      showSelectionMode !== undefined ||
-      showZoom !== undefined ||
-      showNavigation !== undefined ||
-      showThumbnails !== undefined
-    );
-    if (isCustomToolbar && hasBuiltInOnlyProps) {
-      if (!warnedRef.current) {
-        console.warn(
-          'Flipbook: `toolbar={<JSX/>}` (or slot object) was combined with built-in ' +
-          'toolbar props (compact / title / show*). The built-in props are ignored — ' +
-          'the custom `toolbar` JSX dictates rendering. Remove the unused props.',
-        );
-        warnedRef.current = true;
-      }
-    } else {
-      warnedRef.current = false;
-    }
-  }
-
   // Toolbar dispatch — compute top + bottom slot nodes.
   // Four discriminated cases:
   //   1) toolbar === false        → both null
   //   2) toolbar === true | null  → built-in <Toolbar> in both slots
   //   3) isSlotObject(toolbar)    → toolbar.top in top slot; toolbar.bottom in bottom
-  //   4) otherwise (single node)  → top slot null; toolbar in bottom slot
+  //   4) otherwise (single node)  → top slot only; bottom slot null
+  //                                 (changed from BOTTOM in 1.0.0 — see MIGRATION.md §6.2)
   let toolbarTopNode: ReactNode | null = null;
   let toolbarBottomNode: ReactNode | null = null;
 
@@ -256,7 +309,24 @@ export function Flipbook({
     toolbarTopNode = toolbar.top ?? null;
     toolbarBottomNode = toolbar.bottom ?? null;
   } else {
-    toolbarBottomNode = toolbar;   // single ReactNode → bottom slot only
+    toolbarTopNode = toolbar;   // single ReactNode → top slot (changed in 1.0.0)
+    // Single-app deprecation warn for the position change. The whole `if` block
+    // is statically removed in production builds via the NODE_ENV replacement
+    // (Vite / Webpack / esbuild all do this), so Set.has + Set.add disappear
+    // alongside the devWarn call.
+    if (process.env.NODE_ENV !== 'production') {
+      const key = 'flipbook-single-toolbar';
+      if (!warnedDeprecations.has(key)) {
+        warnedDeprecations.add(key);
+        devWarn(
+          '[flipbook] Single ReactNode toolbar position changed in 1.0.0: '
+          + 'now renders in the TOP slot (was BOTTOM in 0.1.0-alpha.1). Use '
+          + '`toolbar={{ bottom: <X/> }}` to target the bottom slot explicitly. '
+          + 'This warning persists through at least 1.0.1; removal trigger is '
+          + 'consumer validation.',
+        );
+      }
+    }
   }
 
   // thumbnailsNode is ALWAYS wired — independent of `showThumbnails`.
@@ -276,7 +346,7 @@ export function Flipbook({
   // `ErrorBoundary`'s `fallback` prop is typed `(error: Error) => ReactNode`.
   const thumbnailsNode: ReactNode = (
     <ErrorBoundary fallback={() => null}>
-      <ThumbnailPanel />
+      <ThumbnailPanel size={thumbnailSize} />
     </ErrorBoundary>
   );
 
@@ -290,6 +360,7 @@ export function Flipbook({
       enablePageCurl={enablePageCurl}
       defaultScale={defaultScale}
       initialTheme={initialTheme}
+      initialInteractionMode={initialInteractionMode}
       onThemeChange={onThemeChange}
       getFullScreenTarget={getFullScreenTarget}
       onEnterFullScreen={onEnterFullScreen}
@@ -305,6 +376,8 @@ export function Flipbook({
       onPrintError={onPrintError}
       onPrintAbort={onPrintAbort}
       documentName={documentName}
-    />
+    >
+      {children}
+    </FlipbookProvider>
   );
 }

@@ -11,6 +11,11 @@ interface ThumbnailButtonProps {
   pageCount: number;
   width: number;
   height: number;
+  /** Page-relative render scale (DPR not included). Computed by
+   *  ThumbnailPanel.resolveItemDimensions; passed through to ThumbnailCanvas
+   *  for its backing-store render. Keeps CSS layout + canvas rasterization
+   *  in lockstep across `thumbnailSize` values. */
+  scale: number;
   inWindow: boolean;       // from useThumbnailVirtualization
 }
 
@@ -52,6 +57,7 @@ export const ThumbnailButton = memo(function ThumbnailButton({
   pageCount,
   width,
   height,
+  scale,
   inWindow,
 }: ThumbnailButtonProps) {
   const { goToPage } = useFlipbookActions();
@@ -135,6 +141,7 @@ export const ThumbnailButton = memo(function ThumbnailButton({
           pageIndex={pageIndex}
           width={width}
           height={height}
+          scale={scale}
         />
       ) : (
         // Placeholder — sized but empty. Keeps scroll-position stable.

@@ -1,9 +1,10 @@
 /**
  * Centralized English label strings for toolbar parts. Single override surface
- * for v0.2 i18n (which will introduce a `ToolbarLabelsContext` that consumers
- * wrap their `<Flipbook>` in to provide translated labels).
+ * for i18n in a future 1.x minor release (which will introduce a
+ * `ToolbarLabelsContext` that consumers wrap their `<Flipbook>` in to provide
+ * translated labels).
  *
- * v0.1 hardcodes English. Consumers wanting different labels per-part override
+ * `1.0.0` hardcodes English. Consumers wanting different labels per-part override
  * by passing `aria-label` (for buttons) at the call site. Readouts (`PageReadout`,
  * `ZoomReadout`) generate visible text via the template functions below;
  * overriding them requires forking the part via the sub-path import.
@@ -40,7 +41,7 @@ export const LABELS = {
   thumbnailsToggle: 'Toggle thumbnails',
   thumbnailButton: (pageNumber: number, totalPages: number) => `Go to page ${pageNumber} of ${totalPages}`,
   printTooLarge: (totalPages: number, limit: number) =>
-    `Document too large to print as one job (${totalPages} pages, limit ${limit}). Page range support coming in v0.2.`,
+    `Document too large to print as one job (${totalPages} pages, limit ${limit}). Page range support coming in a future release.`,
   printRenderFailed: (pageIndex: number, message: string) =>
     `Failed to render page ${pageIndex + 1} for printing: ${message}`,
   printBlobConversionFailed: (pageIndex: number, canvasWidth: number, canvasHeight: number) =>

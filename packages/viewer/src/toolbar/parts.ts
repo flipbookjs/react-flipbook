@@ -27,7 +27,7 @@ export { ThumbnailsToggleButton } from './buttons/ThumbnailsToggleButton';
 export { PageReadout } from './readouts/PageReadout';
 export { ZoomReadout } from './readouts/ZoomReadout';
 
-// Labels (read-only — consumers introspect; v0.2 will add an override surface).
+// Labels (read-only — consumers introspect; a future 1.x minor will add an override surface).
 export { LABELS } from './labels';
 
 // Built-in wrapper (Step 6C).

@@ -4,44 +4,49 @@ import type { PageSource } from '../types/PageSource';
 interface ThumbnailCanvasProps {
   source: PageSource;
   pageIndex: number;       // 0-indexed; consistent with PageSource.renderPage
-  width: number;           // computed CSS pixels (from source.getPageSize * THUMB_SCALE)
+  width: number;           // computed CSS pixels (panel-supplied; matches `scale × getPageSize(pageIndex).width`)
   height: number;
+  /** Page-relative render scale (DPR not included). The canvas multiplies
+   *  by DPR internally. `ThumbnailPanel.resolveItemDimensions` is the
+   *  single source of truth for this value. Keeping it as a prop (vs the
+   *  0.1.0-alpha.1 module-level `THUMB_SCALE = 0.2` constant) is what lets
+   *  larger `thumbnailSize` values stay crisp on Retina: backing-store
+   *  resolution scales with the displayed CSS size. */
+  scale: number;
 }
-
-const THUMB_SCALE = 0.2;
 
 /**
  * Renders a single thumbnail canvas via `PageSource.renderPage(pageIndex,
- * THUMB_SCALE × devicePixelRatio, signal)`. The returned canvas is mounted
+ * scale × devicePixelRatio, signal)`. The returned canvas is mounted
  * directly into the host div via imperative `appendChild` so React manages
  * the host but does not reconcile the canvas's children (no React inside
  * the canvas).
  *
  * **DPR awareness**: the rendered canvas's backing store is sized at
- * `pageSize × THUMB_SCALE × devicePixelRatio`. The canvas's CSS width/
- * height is explicitly set to `THUMB_SCALE × pageSize` (no DPR multiplier)
- * so it DISPLAYS at the host's logical size but RENDERS at the display's
- * native pixel density. On Retina / high-DPI displays (every Mac since
- * 2012, every modern Windows laptop, every recent Android, every iOS
- * device) this is the difference between crisp thumbnails and visibly-
- * blurry bilinear upscale.
+ * `pageSize × scale × devicePixelRatio`. The canvas's CSS width / height
+ * is explicitly set to the panel-supplied `width` / `height` (no DPR
+ * multiplier) so it DISPLAYS at the host's logical size but RENDERS at
+ * the display's native pixel density. On Retina / high-DPI displays
+ * (every Mac since 2012, every modern Windows laptop, every recent
+ * Android, every iOS device) this is the difference between crisp
+ * thumbnails and visibly-blurry bilinear upscale.
  *
  * On unmount or `source` rotation: aborts the in-flight render via the
  * AbortController, and clears the canvas backing store (`width = 0;
  * height = 0`) to release GPU/CPU memory.
  *
- * Memoized: re-renders only when `source` or `pageIndex` changes.
- * `width`/`height` are CSS-only (consumed via the host div's inline
- * style); their changes do not trigger re-render of THIS component
- * but the parent passes new values which triggers new render anyway
- * if document or zoom changes — at which point the source-effect
- * re-fires too.
+ * Memoized: re-renders when `source`, `pageIndex`, or `scale` changes
+ * (the latter so a runtime `thumbnailSize` prop change re-rasterizes the
+ * page at the new backing-store resolution). `width` / `height` are
+ * CSS-only — applied via inline style on the host div and the rendered
+ * canvas — and changes there flow naturally through the parent re-render.
  */
 export const ThumbnailCanvas = memo(function ThumbnailCanvas({
   source,
   pageIndex,
   width,
   height,
+  scale,
 }: ThumbnailCanvasProps) {
   const hostRef = useRef<HTMLDivElement>(null);
 
@@ -54,7 +59,7 @@ export const ThumbnailCanvas = memo(function ThumbnailCanvas({
     // listener and a re-render. v0.1 reads once; if a
     // consumer reports the rare case, v0.2 can add the listener.
     const dpr = typeof window === 'undefined' ? 1 : (window.devicePixelRatio || 1);
-    const renderScale = THUMB_SCALE * dpr;
+    const renderScale = scale * dpr;
     const controller = new AbortController();
     let canvas: HTMLCanvasElement | null = null;
     let aborted = false;
@@ -100,7 +105,7 @@ export const ThumbnailCanvas = memo(function ThumbnailCanvas({
         canvas.remove();
       }
     };
-  }, [source, pageIndex, width, height]);
+  }, [source, pageIndex, width, height, scale]);
 
   return (
     <div

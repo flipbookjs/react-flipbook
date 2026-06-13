@@ -40,17 +40,34 @@ describe('Flipbook toolbar prop dispatch', () => {
     expect(container.querySelector('[role="toolbar"]')).toBeNull();
   });
 
-  it('toolbar={<CustomBar/>} renders the consumer JSX in the bottom slot; no built-in toolbars', async () => {
-    const source = makeSource();
-    function CustomBar() {
-      return <div data-testid="my-custom-bar">Custom toolbar content</div>;
+  it('toolbar={<CustomBar/>} renders the consumer JSX in the top slot; no built-in toolbars', async () => {
+    // Changed in 1.0.0: single ReactNode previously rendered in the BOTTOM
+    // slot (the 0.1.0-alpha.1 behavior). The position swap is documented at
+    // MIGRATION.md §6.2 and in the FlipbookCustomToolbarProps JSDoc.
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const source = makeSource();
+      function CustomBar() {
+        return <div data-testid="my-custom-bar">Custom toolbar content</div>;
+      }
+      const { container } = render(<Flipbook source={source} toolbar={<CustomBar />} />);
+      await waitFor(() => {
+        expect(screen.getByTestId('my-custom-bar')).toBeInTheDocument();
+      });
+      expect(screen.queryByRole('toolbar', { name: LABELS.toolbarTopBarLabel })).toBeNull();
+      expect(screen.queryByRole('toolbar', { name: LABELS.toolbarBottomBarLabel })).toBeNull();
+      // Slot-position assertion: the custom marker is rendered BEFORE the
+      // `.fbjs-container` viewport div (top slot at FlipbookProvider:1039;
+      // viewport at FlipbookProvider:1040-1085).
+      const marker = screen.getByTestId('my-custom-bar');
+      const viewport = container.querySelector('.fbjs-container');
+      expect(viewport).not.toBeNull();
+      expect(marker.compareDocumentPosition(viewport!)).toBe(
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      );
+    } finally {
+      warnSpy.mockRestore();
     }
-    render(<Flipbook source={source} toolbar={<CustomBar />} />);
-    await waitFor(() => {
-      expect(screen.getByTestId('my-custom-bar')).toBeInTheDocument();
-    });
-    expect(screen.queryByRole('toolbar', { name: LABELS.toolbarTopBarLabel })).toBeNull();
-    expect(screen.queryByRole('toolbar', { name: LABELS.toolbarBottomBarLabel })).toBeNull();
   });
 
   it('toolbar={null} (ReactNode null) falls through to built-in (treated like undefined via == null)', async () => {

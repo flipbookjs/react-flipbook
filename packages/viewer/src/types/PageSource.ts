@@ -110,13 +110,13 @@ export interface PageSource {
     signal?: AbortSignal,
   ): Promise<HTMLCanvasElement>;
 
-  /** Optional: text content for selection/search (v0.2) */
+  /** Optional: text content for selection/search (future 1.x minor) */
   getTextContent?(index: number): Promise<TextItem[]>;
 
-  /** Optional: link annotations (v0.2) */
+  /** Optional: link annotations (future 1.x minor) */
   getLinks?(index: number): Promise<LinkAnnotation[]>;
 
-  /** Optional: document outline / table of contents (v0.2) */
+  /** Optional: document outline / table of contents (future 1.x minor) */
   getOutline?(): Promise<OutlineItem[]>;
 
   /** Release all resources (PDF document, cached pages, etc.) */

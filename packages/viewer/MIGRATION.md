@@ -1,7 +1,7 @@
 # Migration Guide — `@flipbookjs/react-viewer` post-Step-6
 
 > Audience: integration owners (CMS, custom apps, embeddable iframe consumers) upgrading from the pre-Step-6 viewer (page spreads only) to the post-Step-6 viewer (full UI chrome).
-> Library version: `@flipbookjs/react-viewer@0.1.0-alpha.1` (alpha — surface still moving; see §10 API stability for what's mobile vs. stable across the alpha track).
+> Library version: `@flipbookjs/react-viewer@1.0.0`. Strict semver from here — see §10 for what's covered and what would trigger a `2.0.0`.
 > Companion docs: `README.md` (entry-point overview, if added), `dist/index.d.ts` (full TypeScript types).
 
 ## 1. What changed at the library level
@@ -21,7 +21,7 @@ Pre-Step-6, the viewer rendered only the page spreads (`<Flipbook url="..." />`)
 ## 1.5 Installation + peer dependencies
 
 ```bash
-npm install @flipbookjs/react-viewer@0.1.0-alpha.1 pdfjs-dist react react-dom
+npm install @flipbookjs/react-viewer@1.0.0 pdfjs-dist react react-dom
 ```
 
 The library declares three peer dependencies that consumers must install alongside the package. The library does NOT bundle them — consumers control the versions to avoid duplication across other PDF + React libraries in the same app.
@@ -96,6 +96,22 @@ interface PageSource {
 ```
 
 Implementations that opt in to URL-based download return a string (the source URL); opt-out implementations omit the method entirely. The built-in `PdfjsSource` implements it: returns the URL for `string`/`URL` sources, `undefined` for `Uint8Array` sources.
+
+### 2.6 Initial interaction mode
+
+Added in `1.0.0`.
+
+| Prop | Origin | Type | Default | Semantic |
+|------|--------|------|---------|----------|
+| `initialInteractionMode` | 1.0.0 | `'select' \| 'pan' \| undefined` | `'select'` | Initial interaction mode applied on mount. `'pan'` for hand-drag panning, `'select'` for text selection. Uncontrolled — to change at runtime, dispatch `actions.setInteractionMode()`. Mirrors the `initialTheme` pattern (read once in the lazy `useReducer` initializer; post-mount prop changes are ignored). |
+
+### 2.7 Thumbnails
+
+Added in `1.0.0`.
+
+| Prop | Origin | Type | Default | Semantic |
+|------|--------|------|---------|----------|
+| `thumbnailSize` | 1.0.0 | `'small' \| 'default' \| 'large' \| number \| undefined` | `undefined` → `pageWidth × 0.2` per page (0.1.0-alpha.1 behavior, preserved for backward compatibility) | Bounding-box width of built-in thumbnail items. When **omitted**, the panel preserves the 0.1.0-alpha.1 sizing (per-page `pageWidth × 0.2`) — un-opted consumers see no visual change. When **supplied**, tokens map to 360 / 480 / 720 px; an explicit number is the literal pixel width for responsive layouts. Height per item derives from each page's actual aspect ratio. Invalid numeric input (`NaN` / `Infinity` / ≤0) falls back to `'default'` (480 px) with a once-per-bad-value dev-warn; values above 2048 px clamp to 2048 with a dev-warn. The canvas backing-store resolution scales with the displayed CSS size, so larger tokens stay crisp on Retina. |
 
 ## 3. Default-flip release notes (LOAD-BEARING for CMS migration)
 
@@ -214,11 +230,13 @@ function App() {
     <Flipbook
       url="/my-document.pdf"
       documentName="My Document"
-      toolbar={<CustomToolbar />}
+      toolbar={{ top: <CustomToolbar /> }}
     />
   );
 }
 ```
+
+The single-`ReactNode` form (`toolbar={<CustomToolbar />}`) also works and renders in the **top** slot from `1.0.0` onward (changed from the bottom slot in the `0.1.0-alpha.1` pre-release). Prefer the explicit slot form above to make the position obvious at the call site and to be resilient to future default changes. To target the bottom slot specifically, use `toolbar={{ bottom: <CustomToolbar /> }}`.
 
 ### 6.3 Custom-button composition (calling actions directly)
 
@@ -259,11 +277,59 @@ The `useFlipbookActions` + `useFlipbookSelector` hooks resolve through React con
 
 - **Roving tabindex:** `<ToolbarShell>` implements arrow-key navigation between parts via the roving-tabindex pattern. Wrapping your custom buttons in a child of `<ToolbarShell>` opts them in via `useToolbarPart`.
 - **Styling:** the built-in part components carry no inline styles — they pick up `.fbjs-*` classes from `styles.css`. Compose with your own className wrappers for layout.
-- **LABELS override:** each part button accepts the standard `aria-label` HTML attribute, defaulting to `LABELS.<key>` (see `LABELS` in the sub-path for the full key list). Per-instance override: `<PrevButton aria-label="Vorige pagina" />`. Global i18n (replacing all labels at once) is **deferred to v0.2** — a `ToolbarLabelsContext` is planned but not shipped in `0.1.0-alpha`. The exported `LABELS` constant is **read-only** in v0.1 (consumers can read it for runtime introspection but not mutate it). Readouts (`PageReadout`, `ZoomReadout`) generate visible text via template functions that aren't overridable in v0.1 without forking the part via the sub-path import.
+- **LABELS override:** each part button accepts the standard `aria-label` HTML attribute, defaulting to `LABELS.<key>` (see `LABELS` in the sub-path for the full key list). Per-instance override: `<PrevButton aria-label="Vorige pagina" />`. Global i18n (replacing all labels at once) is **deferred to a future `1.x` minor release** — a `ToolbarLabelsContext` is planned but not shipped in `1.0.0`. The exported `LABELS` constant is **read-only** in `1.0.0` (consumers can read it for runtime introspection but not mutate it). Readouts (`PageReadout`, `ZoomReadout`) generate visible text via template functions that aren't overridable in `1.0.0` without forking the part via the sub-path import.
 
 ## 7. Theme runtime + onThemeChange persistence
 
+### 7.1 onThemeChange + initialTheme round-trip
+
 Consumers can sync the viewer's theme to their app's theme store via `onThemeChange`. Pattern: lift the theme into a React state, persist to localStorage or your app's theme context, pass back via `initialTheme`.
+
+### 7.2 Driving theme from external state
+
+For CMSes or apps that own theme as global state (Redux / Zustand / Jotai / React Context store), sync external theme INTO the viewer via a small `<ThemeSyncer>` component mounted as a `<Flipbook>` child. The child runs INSIDE provider context, so `useFlipbookActions()` resolves (it throws outside).
+
+```tsx
+import { Flipbook, useFlipbookActions } from '@flipbookjs/react-viewer';
+import { useMyAppThemeStore } from './my-app-state';
+import { useEffect } from 'react';
+
+// Effect host — no UI, just keeps the viewer's theme synced to external state.
+// Must be mounted INSIDE <Flipbook> via the `children` prop so
+// useFlipbookActions can resolve provider context.
+function ThemeSyncer({ theme }: { theme: 'light' | 'dark' }) {
+  const actions = useFlipbookActions();
+  useEffect(() => { actions.setTheme(theme); }, [theme, actions]);
+  return null;
+}
+
+function FlipbookWithExternalTheme({ url }: { url: string }) {
+  const theme = useMyAppThemeStore((s) => s.theme);
+
+  return (
+    <Flipbook
+      url={url}
+      initialTheme={theme}
+      // ^ Seeds the value on FIRST RENDER only — eliminates the flash from
+      //   default to consumer-value at mount. After mount, the `useEffect`
+      //   inside <ThemeSyncer> propagates subsequent external-state changes.
+      onThemeChange={(next) => useMyAppThemeStore.getState().setTheme(next)}
+    >
+      <ThemeSyncer theme={theme} />
+    </Flipbook>
+  );
+}
+```
+
+How this works:
+
+- `<ThemeSyncer>` mounts inside provider context (via the `children` prop), so `useFlipbookActions()` resolves successfully. A sibling/parent of `<Flipbook>` would crash because the provider context isn't established outside.
+- `initialTheme={theme}` seeds the reducer at mount — no flash from `'light'` to the consumer's actual theme value.
+- The `useEffect` inside `<ThemeSyncer>` runs on every external-state change → dispatches `setTheme`. **Note:** introduces a 1-frame render lag (external change → effect runs post-commit → dispatch → re-render). For theme this is invisible in practice; for continuous-slider zoom (see §9.2) it can be perceptible.
+- `onThemeChange` flows toolbar-driven theme changes BACK to the external store when the consumer uses the built-in theme-toggle.
+- `actions.setTheme` has stable identity (per the 6A action-stability contract), so the effect's `[theme, actions]` dep array stays quiet between unrelated re-renders.
+
+**React StrictMode note.** Under React 18+ StrictMode, every effect mounts twice in development (mount → cleanup → mount). `<ThemeSyncer>`'s effect dispatches `actions.setTheme(theme)` twice on mount in dev; both calls dispatch the SAME value, so `flipbookReducer.ts` returns the same state object via the no-op early-return at `SET_THEME` (`if (state.theme === action.value) return state;`) — no cascade, no infinite loop. The deps (`[theme, actions]`) don't change when `setTheme` is dispatched: `actions` is stable per the 6A contract, and `theme` is owned by the EXTERNAL store, not by the viewer. Same logic applies to `<ScaleSyncer>` in §9.2.
 
 ## 8. Print integration callbacks
 
@@ -271,30 +337,85 @@ Consumers can sync the viewer's theme to their app's theme store via `onThemeCha
 
 ## 9. Download integration
 
+### 9.1 documentName + filename sanitization
+
 `documentName` is the semantic filename prop (distinct from display-only `title`). The library applies `sanitizeFilename` (strips OS-illegal chars, caps at 200 chars, ensures single `.pdf` extension). Consumer-side analytics for download clicks go via `<DownloadButton onClick={...} />`.
+
+### 9.2 Driving zoom from external state
+
+For apps that own zoom level as external state (e.g., persisted user preference, analytics-driven zoom suggestion), sync via a `<ScaleSyncer>` child — same pattern as §7.2's `<ThemeSyncer>`:
+
+```tsx
+import { Flipbook, useFlipbookActions } from '@flipbookjs/react-viewer';
+import type { DefaultScale } from '@flipbookjs/react-viewer';
+import { useMyAppZoomStore } from './my-app-state';
+import { useEffect } from 'react';
+
+function ScaleSyncer({ scale }: { scale: DefaultScale }) {
+  const actions = useFlipbookActions();
+  useEffect(() => { actions.setZoom(scale); }, [scale, actions]);
+  return null;
+}
+
+function FlipbookWithExternalZoom({ url }: { url: string }) {
+  const scale = useMyAppZoomStore((s) => s.scale);
+  return (
+    <Flipbook url={url} defaultScale={scale}>
+      <ScaleSyncer scale={scale} />
+    </Flipbook>
+  );
+}
+```
+
+Same render-lag trade-off as §7.2 (1 frame between external change and viewer re-render). Typically invisible for stepped zoom (preset buttons); potentially perceptible during continuous-slider drag, where the consumer is dragging at >60Hz and feels each frame. If that becomes a real consumer complaint, the fix is a separate piece of work (snapshot-reads-from-prop-directly refactor) — not bundled into this batch.
+
+`actions.setZoom` accepts the same `DefaultScale` union as `defaultScale` (numeric scale factor, fit-mode strings, or `SpecialZoomLevel` enum members).
 
 ## 10. API stability
 
-Step 6 ships at `@flipbookjs/react-viewer@0.1.0-alpha.1` (bumped from `0.1.0-alpha.0` to distinguish the post-Step-6 surface). The alpha designation signals the surface is still moving — consumers integrating now should pin the exact version (`"@flipbookjs/react-viewer": "0.1.0-alpha.1"`) and expect breaking changes in the next alpha/beta. The first non-alpha release will freeze the surface.
+`1.0.0` commits the library to strict semver. Consumers can safely use a caret range (`"@flipbookjs/react-viewer": "^1.0.0"`) and expect:
 
-**What's alpha-mobile:** the following are NOT semver-stable in the alpha track and may change between `0.1.0-alpha.N` and `0.1.0-alpha.N+1` without a major-version bump:
+- **PATCH releases (`1.0.x`)** — bug fixes and dev-warn removals only. No new public surface.
+- **MINOR releases (`1.x.0`)** — additive only. New props on `<Flipbook>`, new optional `PageSource` methods, new `FlipbookHookActions` actions, new `FlipbookHookState` fields, new CSS custom properties, new components in the `toolbar-parts` sub-path. Existing surface unchanged.
+- **MAJOR releases (`2.0.0`)** — only path for breaking changes (see "What requires a major bump" below). Will ship with a migration guide.
 
-- Prop names (e.g., `documentName` may be subsumed by a `name?: string` unifier per the 6F2 D7 forward-compat note).
-- Optional `PageSource` interface methods (e.g., `getTextContent?()`, `getLinks?()`, `getOutline?()`) — implementations should not assume the SHAPE of these methods is stable.
-- `FlipbookHookState` field set (e.g., new state fields may be added; the discriminated union over `status: 'loading' | 'ready' | 'error'` is stable but the per-status field set may expand).
-- `FlipbookHookActions` action set (e.g., new actions like `cancelPrint` were added mid-alpha in 6F1; future alphas may add more).
-- Default values (e.g., the consumer-visible `showDownload` flip from hidden to shown happened in 6F2; future flips may occur).
-- CSS custom-property names + values — the `--fbjs-*` variable set in `styles.css` is documented but the specific values may shift.
+### What's covered by `1.x` semver (will not break without a `2.0.0`)
 
-**What's SEMVER-stable across alpha:** the following will not change without a major version bump:
+- **Every prop on `<Flipbook>`** documented in §2 — names, types, defaults, and the discriminated-union shape of `FlipbookProps`.
+- **Every required and optional method** on the `PageSource` interface, INCLUDING the SHAPE (signature + return type) of the optional methods (`getSourceUrl?()`, `getTextContent?()`, `getLinks?()`, `getOutline?()`).
+- **The full public hook surface:** `useFlipbook`, `useFlipbookSelector`, `useFlipbookActions`, `shallowEqual` — including signatures, return shapes, and SSR-safety contracts.
+- **Every action on `FlipbookHookActions`** documented as of `1.0.0` — names, signatures, dispatch semantics.
+- **Every field on `FlipbookHookState`** documented as of `1.0.0` — names and types. The discriminated union over `status: 'loading' | 'ready' | 'error'` is stable.
+- **All `.fbjs-*` CSS class names** in `styles.css`.
+- **All `--fbjs-*` CSS custom-property NAMES.** Default VALUES are documented but may shift in MINOR releases when a value tweak is non-breaking for the documented contract (e.g., a color refinement); MAJOR-breaking value changes would go to `2.0.0`.
+- **Import paths:** `'@flipbookjs/react-viewer'`, `'@flipbookjs/react-viewer/toolbar-parts'`, `'@flipbookjs/react-viewer/styles.css'`.
+- **`PageSource` adapter exports:** `PdfjsSource`, `PdfjsSourceOptions`, `configurePdfWorker`.
+- **Component identity:** `<Flipbook>` as the primary integration point; `<Toolbar>` and the toolbar parts as composable building blocks.
 
-- The `'@flipbookjs/react-viewer'` main-entry import path.
-- The `'@flipbookjs/react-viewer/toolbar-parts'` sub-path import path.
-- The `'@flipbookjs/react-viewer/styles.css'` styles import path.
-- The `FlipbookProps.url` prop name (most-fundamental consumer surface).
-- The `<Flipbook>` component as the primary integration point.
+### What MAY evolve additively across `1.x` minor releases
 
-Consumers depending on alpha-mobile surfaces should pin the EXACT version, not a range.
+- New optional `PageSource` methods (e.g., a `getSearchIndex?()` for full-text search).
+- New `FlipbookHookActions` actions (e.g., a `setRotation()` for page rotation support).
+- New `FlipbookHookState` fields (e.g., a `rotation` field on the same state object).
+- New props on `<Flipbook>` — all additive optional.
+- New `toolbar-parts` sub-path exports — new button components, readouts, helpers.
+- New CSS custom properties for new features.
+
+Additive evolution does NOT require a major-version bump and does NOT break existing consumers.
+
+### What requires a `2.0.0`
+
+- Removing or renaming any existing prop, hook export, action, state field, or CSS class.
+- Changing the type or signature of any existing public surface.
+- Flipping the DEFAULT VALUE of any existing prop in a consumer-visible way.
+- Removing a `PageSource` method from the optional set in a way that makes existing implementations type-incompatible.
+- Any change that requires an existing consumer to modify code to keep working.
+
+The `2.0.0` migration plan will ship with a separate MIGRATION-v2.md guide listing every breaking change, the equivalent v1 → v2 replacement, and any deprecation aid (e.g., codemods or runtime warnings landed in late `1.x` releases).
+
+### What's deferred to a future MINOR release (not breaking)
+
+See §11 for the forward-compatibility plan: text content extraction (v0.2 work, now planned for a `1.x` minor), link annotations, document outline, i18n via `ToolbarLabelsContext`. All additive.
 
 ## 11. Forward-compatibility hooks
 
@@ -307,7 +428,7 @@ Consumers depending on alpha-mobile surfaces should pin the EXACT version, not a
 For each integration, walk this list before deploying the upgraded viewer:
 
 - [ ] **Install peer dependencies:** `pdfjs-dist@^5.6.0`, `react@>=18.0.0`, `react-dom@>=18.0.0` — see §1.5 for the version matrix and install-tool-version behavior (npm 6 vs 7+ vs strict-peer modes).
-- [ ] **Pin the version:** `npm install @flipbookjs/react-viewer@0.1.0-alpha.1` (exact pin, no range — see §10 API stability).
+- [ ] **Pin the version:** `npm install @flipbookjs/react-viewer@^1.0.0` (caret range; minor + patch updates are additive only — see §10 API stability).
 - [ ] **Audit `<Flipbook>` prop usage in the CMS integration code.** Cross-reference against §2's tables. Most props are additive; the load-bearing migration is §3.1.
 - [ ] **§3.1 — Download default:** if the integration relied on the download button being HIDDEN (without passing `showDownload`), add `showDownload={false}` explicitly. Otherwise the button will start showing post-upgrade for URL-backed sources.
 - [ ] **§4.1 — Iframe sandbox tokens:** if the viewer renders inside `<iframe sandbox="...">`, add `allow-downloads`, `allow-popups`, `allow-modals` to the token list. Without these, download + print silently fail.
@@ -317,7 +438,7 @@ For each integration, walk this list before deploying the upgraded viewer:
 - [ ] **§8 — Print integration (optional):** wire `onPrintStart` / `onPrintComplete` / `onPrintError` / `onPrintAbort` to analytics + user-facing notifications if applicable.
 - [ ] **§9 — Download filename:** pass `documentName` if the source URL's basename isn't a good filename (e.g., URLs like `/api/pdf?id=123` — the library falls back to `pdf` as the basename, which is rarely what users want).
 - [ ] **Smoke test in target environment:** open the integrated viewer in the CMS, click each toolbar button, verify each behavior (prev/next, zoom, fullscreen, print, download, selection mode, theme toggle, thumbnails). The viewer's default UI exercises every action — if all buttons work end-to-end, the integration is good.
-- [ ] **(Composition-path consumers only) Audit `toolbar-parts` imports:** sub-path imports are SEMVER-stable across the alpha track (per §10). If you upgraded an existing composition, the only forward-looking risk is new parts being added — your composition still works; new parts just aren't picked up automatically.
+- [ ] **(Composition-path consumers only) Audit `toolbar-parts` imports:** sub-path imports are SEMVER-stable across the `1.x` line (per §10). If you upgraded an existing composition, the only forward-looking risk is new parts being added — your composition still works; new parts just aren't picked up automatically.
 
 ## 13. SSR / Next.js / Remix integration
 

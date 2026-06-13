@@ -61,50 +61,43 @@ describe('Flipbook thumbnails dispatch', () => {
     expect(outer).toHaveAttribute('aria-hidden', 'true');
   });
 
-  it('custom toolbar can open the panel via actions.toggleThumbnails when showThumbnails={false}', async () => {
+  it('custom UI can open the panel via actions.toggleThumbnails when showThumbnails={false}', async () => {
     // The button-only contract's load-bearing claim: with the built-in
     // toggle hidden via showThumbnails={false}, custom UI can still drive
-    // the panel via the public hook. This test injects a custom toggle via
-    // <Flipbook toolbar={<CustomToggle/>}> so the hook usage lives INSIDE
-    // the FlipbookProvider context.
-    //
-    // Combining toolbar={<JSX/>} with showThumbnails={false} triggers the
-    // 6C built-in-only-prop conflict dev-warn (a documented warning, not a
-    // failure). Suppress it for the test.
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      const source = makeSource();
-      function CustomToggle() {
-        const actions = useFlipbookActions();
-        return (
-          <button data-testid="custom-toggle" onClick={() => actions.toggleThumbnails()}>
-            Open
-          </button>
-        );
-      }
-      const { container } = render(
-        <Flipbook source={source} showThumbnails={false} toolbar={<CustomToggle />} />,
+    // the panel via the public hook. This test mounts a custom toggle via
+    // the `children` prop on <Flipbook>, which places the toggle INSIDE
+    // the FlipbookProvider context so useFlipbookActions() resolves.
+    const source = makeSource();
+    function CustomToggle() {
+      const actions = useFlipbookActions();
+      return (
+        <button data-testid="custom-toggle" onClick={() => actions.toggleThumbnails()}>
+          Open
+        </button>
       );
-      // Wait for the custom toggle to appear (proves the provider mounted
-      // and the toolbar prop dispatch placed it in the bottom slot).
-      const customToggle = await screen.findByTestId('custom-toggle');
-      // Panel starts closed.
-      const initialOuter = container.querySelector('.fbjs-thumbnail-panel');
-      expect(initialOuter).toHaveAttribute('data-open', 'false');
-      // Custom UI dispatches the action.
-      act(() => { customToggle.click(); });
-      // Panel opens — same outer DOM node, data-open flips, aria-hidden
-      // removed, inner buttons mount.
-      await waitFor(() => {
-        expect(container.querySelector('.fbjs-thumbnail-panel')).toHaveAttribute('data-open', 'true');
-      });
-      const openedOuter = container.querySelector('.fbjs-thumbnail-panel')!;
-      expect(openedOuter).toBe(initialOuter);
-      expect(openedOuter).not.toHaveAttribute('aria-hidden');
-      expect(screen.getAllByRole('button', { name: /Go to page/ })).toHaveLength(4);
-    } finally {
-      warnSpy.mockRestore();
     }
+    const { container } = render(
+      <Flipbook source={source} showThumbnails={false}>
+        <CustomToggle />
+      </Flipbook>,
+    );
+    // Wait for the custom toggle to appear (proves the provider mounted
+    // and rendered children inside provider context).
+    const customToggle = await screen.findByTestId('custom-toggle');
+    // Panel starts closed.
+    const initialOuter = container.querySelector('.fbjs-thumbnail-panel');
+    expect(initialOuter).toHaveAttribute('data-open', 'false');
+    // Custom UI dispatches the action.
+    act(() => { customToggle.click(); });
+    // Panel opens — same outer DOM node, data-open flips, aria-hidden
+    // removed, inner buttons mount.
+    await waitFor(() => {
+      expect(container.querySelector('.fbjs-thumbnail-panel')).toHaveAttribute('data-open', 'true');
+    });
+    const openedOuter = container.querySelector('.fbjs-thumbnail-panel')!;
+    expect(openedOuter).toBe(initialOuter);
+    expect(openedOuter).not.toHaveAttribute('aria-hidden');
+    expect(screen.getAllByRole('button', { name: /Go to page/ })).toHaveLength(4);
   });
 
   // Source rotation while panel is open.

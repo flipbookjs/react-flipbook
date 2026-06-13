@@ -12,6 +12,7 @@ export type { ToolbarProps } from './toolbar/Toolbar';
 
 // Thumbnail panel (Step 6D)
 export { ThumbnailPanel } from './thumbnails/ThumbnailPanel';
+export type { ThumbnailPanelProps } from './thumbnails/ThumbnailPanel';
 
 // PageSource interface
 export type {

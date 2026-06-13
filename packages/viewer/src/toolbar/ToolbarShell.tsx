@@ -35,7 +35,7 @@ interface ToolbarShellProps extends Omit<HTMLAttributes<HTMLDivElement>, 'role'>
   /**
    * Custom aria-label. Defaults to `LABELS.toolbarLabel`
    * ("Document viewer controls"). Override for i18n or context-specific
-   * naming. v0.2 introduces a ToolbarLabelsContext for global override.
+   * naming. A future 1.x minor introduces a ToolbarLabelsContext for global override.
    */
   'aria-label'?: string;
 }
@@ -92,7 +92,7 @@ export const ToolbarShell = forwardRef<HTMLDivElement, ToolbarShellProps>(
         // user sees one re-render with the final activeId (likely `null` if
         // every part went away). Correct but wasteful — each re-election
         // does an O(1) Map.keys().next() call that's thrown away. Optimization
-        // for v0.2: clear activeId to null on any active-id removal and let
+        // for a future 1.x minor: clear activeId to null on any active-id removal and let
         // the next registerPart re-elect. Defer; current cost is negligible
         // for 9-11 parts.
         setActiveIdRaw((prev) => {

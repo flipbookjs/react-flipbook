@@ -11,8 +11,105 @@ import {
 } from './ThumbnailPanelContext';
 import { useThumbnailVirtualization } from './useThumbnailVirtualization';
 import type { PageSource } from '../types/PageSource';
+import { devWarn } from '../core/devWarn';
 
 const THUMB_SCALE = 0.2;
+const SIZE_PX = { small: 360, default: 480, large: 720 } as const;
+const MAX_THUMB_WIDTH = 2048;
+
+// Module-level once-per-bad-value guard for sanitization warnings. Lives in
+// module scope (not React state) so re-renders with the same bad value don't
+// re-warn. Cleared only on full module reload (page reload in dev / HMR).
+//
+// The entire dedup body is gated on `process.env.NODE_ENV !== 'production'`
+// via the early-return in `warnOnceForSize`. `devWarn` alone is DCE-stripped
+// in production, but the surrounding `Set.has` / `Set.add` calls would still
+// execute (and the Set would still grow) without the explicit guard.
+// Wrapping the function body means bundlers eliminate the entire dedup logic
+// in production: no Set growth, no method calls, no runtime cost.
+const warnedSizes = new Set<unknown>();
+function warnOnceForSize(badValue: unknown, message: string): void {
+  if (process.env.NODE_ENV === 'production') return;
+  if (warnedSizes.has(badValue)) return;
+  warnedSizes.add(badValue);
+  devWarn(message);
+}
+
+/**
+ * Resolve per-page render dimensions from the `size` prop + the source page
+ * dimensions. Returns CSS layout `{ width, height }` AND the per-page render
+ * `scale` (page-relative, DPR not included). The scale is consumed by
+ * `<ThumbnailCanvas>` for its backing-store render — keeping CSS layout and
+ * canvas rasterization in lockstep across `thumbnailSize` values.
+ *
+ *   - `size === undefined` (omitted) → preserves 0.1.0-alpha.1 behavior: per-page
+ *     `pageWidth × 0.2`, `pageHeight × 0.2`, scale `0.2`.
+ *   - Token (`'small' | 'default' | 'large'`) → maps to fixed itemWidth
+ *     (360 / 480 / 720 px); scale = `itemWidth / pageWidth`.
+ *   - Numeric → literal pixel itemWidth, with sanitization:
+ *       - NaN / Infinity / ≤0 → falls back to `'default'` (480 px) with a
+ *         once-per-bad-value dev-warn.
+ *       - >MAX_THUMB_WIDTH (2048) → clamps to the cap with a dev-warn.
+ *
+ * Helper choice — `devWarn` (not raw `console.warn`). The codebase precedent
+ * is split: defaultScale-after-mount uses `console.warn` (FlipbookProvider:294);
+ * printScale / printMaxPages uses `devWarn`. We follow the printScale
+ * precedent here — invalid `thumbnailSize` is consumer-visible feedback
+ * during dev, silent in production (DCE-stripped). If a future commit unifies
+ * the codebase on raw `console.warn`, this resolver moves with it.
+ */
+function resolveItemDimensions(
+  size: 'small' | 'default' | 'large' | number | undefined,
+  pageSize: { width: number; height: number },
+): { width: number; height: number; scale: number } {
+  // Omitted → 0.1.0-alpha.1 per-page behavior.
+  if (size === undefined) {
+    return {
+      width: Math.round(pageSize.width * THUMB_SCALE),
+      height: Math.round(pageSize.height * THUMB_SCALE),
+      scale: THUMB_SCALE,
+    };
+  }
+  let itemWidth: number;
+  if (typeof size === 'number') {
+    if (!Number.isFinite(size) || size <= 0) {
+      warnOnceForSize(
+        size,
+        `ThumbnailPanel: thumbnailSize={${size}} is not a valid positive width; falling back to 'default' (${SIZE_PX.default}px).`,
+      );
+      itemWidth = SIZE_PX.default;
+    } else if (size > MAX_THUMB_WIDTH) {
+      warnOnceForSize(
+        size,
+        `ThumbnailPanel: thumbnailSize={${size}} exceeds MAX_THUMB_WIDTH (${MAX_THUMB_WIDTH}); clamping.`,
+      );
+      itemWidth = MAX_THUMB_WIDTH;
+    } else {
+      itemWidth = size;
+    }
+  } else {
+    itemWidth = SIZE_PX[size];
+  }
+  const scale = itemWidth / pageSize.width;
+  return {
+    width: Math.round(itemWidth),
+    height: Math.round(pageSize.height * scale),
+    scale,
+  };
+}
+
+/** Public props for `<ThumbnailPanel>`. Added in 1.0.0 to support
+ *  the `<Flipbook thumbnailSize>` prop. Existing zero-arg `<ThumbnailPanel/>`
+ *  call sites keep compiling — `size` is optional and its `undefined` branch
+ *  preserves 0.1.0-alpha.1 sizing. */
+export interface ThumbnailPanelProps {
+  /** Bounding-box width of each thumbnail item. Omitted → preserves 0.1.0-alpha.1
+   *  behavior (per-page `pageWidth × 0.2`). Tokens map to 360 / 480 / 720 px;
+   *  number is the literal pixel width. Invalid numeric input (NaN / Infinity
+   *  / ≤0) falls back to `'default'` (480 px) with a once-per-bad-value
+   *  dev-warn; values above 2048 px clamp with a dev-warn. */
+  size?: 'small' | 'default' | 'large' | number;
+}
 
 interface ThumbnailPanelSlice {
   isOpen: boolean;
@@ -66,7 +163,7 @@ interface ThumbnailPanelSlice {
  * panel-context layer never triggers consumer re-renders. Per-button
  * re-renders are gated by the `useSyncExternalStore` selector flips.
  */
-export const ThumbnailPanel = memo(function ThumbnailPanel() {
+export const ThumbnailPanel = memo(function ThumbnailPanel({ size }: ThumbnailPanelProps = {}) {
   const isMounted = useIsMounted();
   // Source via narrow selector — only re-renders on source rotation
   // (status === 'ready' transition or source object identity change).
@@ -160,19 +257,19 @@ export const ThumbnailPanel = memo(function ThumbnailPanel() {
   });
 
   // Compute per-page dimensions (synchronous, getPageSize is post-init).
-  // Memoized on (source, pageCount) — re-renders when source rotates.
+  // Memoized on (source, status, pageCount, size) — re-runs when source
+  // rotates OR when the consumer changes the `thumbnailSize` prop. Without
+  // `size` in the deps, a prop change would return stale cached dimensions
+  // and the thumbnails would appear non-reactive to runtime size changes.
   const dimensions = useMemo(() => {
     if (slice.status !== 'ready' || source === null) return null;
-    const result: Array<{ width: number; height: number }> = [];
+    const result: Array<{ width: number; height: number; scale: number }> = [];
     for (let i = 0; i < slice.pageCount; i++) {
-      const size = source.getPageSize(i);
-      result.push({
-        width: Math.round(size.width * THUMB_SCALE),
-        height: Math.round(size.height * THUMB_SCALE),
-      });
+      const pageSize = source.getPageSize(i);
+      result.push(resolveItemDimensions(size, pageSize));
     }
     return result;
-  }, [source, slice.status, slice.pageCount]);
+  }, [source, slice.status, slice.pageCount, size]);
 
   if (!isMounted) return null;
 
@@ -201,6 +298,7 @@ export const ThumbnailPanel = memo(function ThumbnailPanel() {
               pageCount={slice.pageCount}
               width={dim.width}
               height={dim.height}
+              scale={dim.scale}
               inWindow={inWindow}
             />
           );

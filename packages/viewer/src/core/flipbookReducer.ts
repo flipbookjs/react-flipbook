@@ -149,6 +149,7 @@ export function createInitialState(
   viewMode: 'single' | 'dual-cover' | 'auto' = 'auto',
   defaultScale: DefaultScale = 'fit-page',
   initialTheme: 'light' | 'dark' = 'light',
+  initialInteractionMode: 'select' | 'pan' = 'select',
 ): FlipbookState {
   const resolvedViewMode = viewMode === 'auto' ? 'single' : viewMode;
   const { zoomMode, customScale } = resolveDefaultScale(defaultScale);
@@ -165,7 +166,7 @@ export function createInitialState(
     // ---- Step 6A additions ----
     isFullScreen: false,
     theme: initialTheme,
-    interactionMode: 'select',
+    interactionMode: initialInteractionMode,
     isPrinting: false,
     printError: null,
     // ---- Step 6D additions ----
