@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
-// Type-only assertion file for the FlipbookProps discriminated union (D1).
+// Type-only assertion file for the FlipbookProps discriminated union.
 //
 // This file deliberately contains NO `it()` / `describe()` / `test()` blocks.
 // Vitest will report it as an empty test file. The assertions are enforced

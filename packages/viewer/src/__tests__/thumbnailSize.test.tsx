@@ -26,7 +26,7 @@ afterEach(() => {
 //    Reserved values:
 //      - NaN, Infinity, 0, -50  — used by the it.each sanitization block
 //      - 2049, 9999             — used by the clamp test
-//      - -77                    — used by the once-per-session test (MED #4)
+//      - -77                    — used by the once-per-session test
 //      - 400                    — used by the numeric-pass-through test
 //
 //    Future tests that add bad-value assertions MUST pick fresh values.
@@ -48,7 +48,7 @@ const mockReadySource: PageSource = {
   dispose: () => {},
 };
 
-// Side-channel child that uses the new `children` prop (Phase 5) to dispatch
+// Side-channel child that uses the new `children` prop to dispatch
 // `setThumbnailsOpen(true)` from inside provider context. Without this, the
 // panel's `[data-page-index]` children never mount (gated on
 // `slice.isOpen && slice.status === 'ready'` at ThumbnailPanel.tsx:190-191).
@@ -134,7 +134,7 @@ describe('Flipbook thumbnailSize prop', () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('exceeds MAX_THUMB_WIDTH'));
   });
 
-  // MED #4: same bad value re-rendered N times → exactly one warn.
+  // Same bad value re-rendered N times → exactly one warn.
   // IMPORTANT: uses a SENTINEL bad value (-77) reserved exclusively for this
   // test. The module-level `warnedSizes` Set persists across `it()` blocks in
   // this file. If this test used NaN / Infinity / 0 / -50, it would interfere
@@ -162,10 +162,10 @@ describe('Flipbook thumbnailSize prop', () => {
     expect(warn.mock.calls.length).toBe(callsAfterFirst);
   });
 
-  // MED #2: prop change at runtime re-derives dimensions (no stale memo).
-  // This test validates that `size` is in the useMemo deps in
-  // ThumbnailPanel.tsx — without it the memo returns cached dimensions on
-  // re-render and the prop appears non-reactive.
+  // Prop change at runtime re-derives dimensions (no stale memo). This test
+  // validates that `size` is in the useMemo deps in ThumbnailPanel.tsx —
+  // without it the memo returns cached dimensions on re-render and the prop
+  // appears non-reactive.
   it('prop change re-derives dimensions on re-render', async () => {
     const { rerender } = render(
       <Flipbook source={mockReadySource} thumbnailSize="small">

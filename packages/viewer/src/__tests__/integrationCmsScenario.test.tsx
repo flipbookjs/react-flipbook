@@ -6,17 +6,17 @@ import type { FlipbookHookState } from '../hooks/useFlipbook';
 import type { PageSource } from '../types/PageSource';
 
 // Realistic combined-CMS scenario covering every 1.0.0 fix in one render:
-//   - Phase 1: discriminated union (custom toolbar via slot object — no
-//     show*/compact/title)
-//   - Phase 3: toolbar={{ top: ... }} → top-slot rendering (the explicit-slot
-//     form documented as preferred over single-ReactNode at MIGRATION.md §6.2)
-//   - Phase 4: initialInteractionMode='pan' seeds state.interactionMode
-//   - Phase 2: thumbnailSize='small' wired through to ThumbnailPanel (panel
-//     is NOT opened in this scenario — width assertion lives in
+//   - Discriminated union — custom toolbar via slot object (no
+//     show*/compact/title).
+//   - toolbar={{ top: ... }} → top-slot rendering (the explicit-slot form
+//     documented as preferred over single-ReactNode at MIGRATION.md §6.2).
+//   - initialInteractionMode='pan' seeds state.interactionMode.
+//   - thumbnailSize='small' wired through to ThumbnailPanel (panel is NOT
+//     opened in this scenario — width assertion lives in
 //     thumbnailSize.test.tsx, which uses <ThumbnailsOpener>; here we just
-//     verify the prop is accepted without compile error or runtime warn)
-//   - Phase 5: children prop forwards a state-capture component into provider
-//     context; pre-existing initialTheme='dark' seeds state.theme
+//     verify the prop is accepted without compile error or runtime warn).
+//   - children prop forwards a state-capture component into provider
+//     context; initialTheme='dark' seeds state.theme.
 //
 // Uses <Flipbook> directly (NOT <FlipbookProvider>) — the prop-forwarding
 // chain Flipbook → Provider is part of what we're testing.

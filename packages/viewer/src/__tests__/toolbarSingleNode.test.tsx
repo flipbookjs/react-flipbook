@@ -115,8 +115,8 @@ describe('Flipbook single-ReactNode toolbar position (1.0.0)', () => {
     );
   });
 
-  // MED #2: prop reshape on re-render. Catches stale slot memoization or
-  // accidental once-per-mount-only branching in Flipbook.tsx's dispatch.
+  // Prop reshape on re-render. Catches stale slot memoization or accidental
+  // once-per-mount-only branching in Flipbook.tsx's dispatch.
   it('reshapes top/bottom slots when toolbar prop changes shape on re-render', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {

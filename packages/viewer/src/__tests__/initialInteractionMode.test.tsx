@@ -15,8 +15,8 @@ function makeSource(): PageSource {
   };
 }
 
-// State-capture side channel mounted via the `children` prop (Phase 5). The
-// hook resolves the provider context because the child renders inside the
+// State-capture side channel mounted via the `children` prop. The hook
+// resolves the provider context because the child renders inside the
 // provider scope at FlipbookProvider.tsx:1089.
 function StateCapture({ stateRef }: { stateRef: { current: FlipbookHookState | null } }) {
   const hook = useFlipbook();
