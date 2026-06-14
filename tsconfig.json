@@ -3,6 +3,6 @@
   "include": ["packages/*/src"],
   "compilerOptions": {
     "noEmit": true,
-    "types": ["node"]
+    "types": ["node", "@testing-library/jest-dom"]
   }
 }
