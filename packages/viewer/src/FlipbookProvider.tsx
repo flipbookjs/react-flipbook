@@ -894,15 +894,26 @@ export function FlipbookProvider({
   ]);
 
   // ---- Helpers ----
-  // canDownload is a derived boolean keyed on `source` — recomputed when the
-  // source rotates, but the OUTPUT is just `true | false`. Naive inclusion of
-  // `source` in the `helpers` deps array below would rotate `helpers` identity
-  // (and embedded `pageToSpreadIndex`) on every source change — defeats the
-  // memo-stability characteristic for consumers using `React.memo` +
+  // canDownload is a derived boolean keyed on `source` AND `sourceStatus` —
+  // recomputed when the source rotates OR transitions loading→ready, but the
+  // OUTPUT is just `true | false`. Naive inclusion of `source` in the
+  // `helpers` deps array below would rotate `helpers` identity (and embedded
+  // `pageToSpreadIndex`) on every source change — defeats the memo-stability
+  // characteristic for consumers using `React.memo` +
   // `helpers.pageToSpreadIndex`. Splitting into two memos: `canDownload`
-  // recomputes per source; `helpers` only rotates when `canDownload`'s boolean
-  // VALUE flips (rare — only when source crosses URL-vs-Uint8Array boundary).
-  const canDownload = useMemo(() => !!source.getSourceUrl?.(), [source]);
+  // recomputes per source/status; `helpers` only rotates when `canDownload`'s
+  // boolean VALUE flips (rare — only when source crosses URL-vs-Uint8Array
+  // boundary, or when an async source's `getSourceUrl()` becomes truthy after
+  // init completes).
+  //
+  // The `sourceStatus` dep is load-bearing for PageSource implementations
+  // whose `getSourceUrl()` depends on init having completed (e.g.,
+  // `@flipbookjs/api-adapter`'s `PreRenderedPageSource`, whose source URL
+  // is declared in the manifest fetched during init). For `PdfjsSource`
+  // — whose `getSourceUrl()` returns the constructor-set `this.url` and is
+  // independent of init — this dep is a no-op: the boolean value doesn't
+  // change across the loading→ready transition.
+  const canDownload = useMemo(() => !!source.getSourceUrl?.(), [source, sourceStatus]);
 
   const helpers = useMemo<FlipbookHookHelpers>(() => ({
     canDownload,
