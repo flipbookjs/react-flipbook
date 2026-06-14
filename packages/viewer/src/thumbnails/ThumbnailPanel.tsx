@@ -250,8 +250,25 @@ export const ThumbnailPanel = memo(function ThumbnailPanel({ size }: ThumbnailPa
     [store, registerButton, focusIndex],
   );
 
+  // The page count used to size the panel's contents comes from the LIVE
+  // source — NOT from `slice.pageCount` (which is `state.pageCount` from
+  // the reducer). `state.pageCount` lags the source by one render after a
+  // source rotation: the source-rotation effect that dispatches
+  // SOURCE_CHANGED fires AFTER the render in which sourceState already
+  // flipped to 'ready' with the new source. During that one-render window,
+  // `slice.pageCount` still holds the OLD source's count while `source` is
+  // already the NEW one — iterating `i < slice.pageCount` and calling
+  // `source.getPageSize(i)` past the new source's actual pages returns
+  // undefined and crashes downstream (`pageSize.width` of undefined).
+  // Reading from `source.getPageCount()` removes the race: the source is
+  // self-consistent. `slice.pageCount` remains in the selector + memo deps
+  // below so the panel still re-renders when the reducer state catches up.
+  const realPageCount = slice.status === 'ready' && source !== null
+    ? source.getPageCount()
+    : 0;
+
   const { visibleRange } = useThumbnailVirtualization({
-    pageCount: slice.pageCount,
+    pageCount: realPageCount,
     scrollRoot,
     itemSelector: '[data-page-index]',
   });
@@ -261,10 +278,14 @@ export const ThumbnailPanel = memo(function ThumbnailPanel({ size }: ThumbnailPa
   // rotates OR when the consumer changes the `thumbnailSize` prop. Without
   // `size` in the deps, a prop change would return stale cached dimensions
   // and the thumbnails would appear non-reactive to runtime size changes.
+  // `slice.pageCount` is kept in the deps so a SOURCE_CHANGED dispatch that
+  // updates the reducer (one tick after source rotation) still triggers a
+  // memo re-run even though the body only reads `realPageCount`.
   const dimensions = useMemo(() => {
     if (slice.status !== 'ready' || source === null) return null;
+    const count = source.getPageCount();
     const result: Array<{ width: number; height: number; scale: number }> = [];
-    for (let i = 0; i < slice.pageCount; i++) {
+    for (let i = 0; i < count; i++) {
       const pageSize = source.getPageSize(i);
       result.push(resolveItemDimensions(size, pageSize));
     }
@@ -287,7 +308,7 @@ export const ThumbnailPanel = memo(function ThumbnailPanel({ size }: ThumbnailPa
   const inner =
     slice.isOpen && slice.status === 'ready' && source !== null && dimensions !== null ? (
       <div ref={setScrollRoot} className="fbjs-thumbnail-panel__scroll">
-        {Array.from({ length: slice.pageCount }, (_, i) => {
+        {Array.from({ length: realPageCount }, (_, i) => {
           const dim = dimensions[i];
           const inWindow = i >= visibleRange.start && i < visibleRange.end;
           return (
@@ -295,7 +316,7 @@ export const ThumbnailPanel = memo(function ThumbnailPanel({ size }: ThumbnailPa
               key={i}
               source={source as PageSource}
               pageIndex={i}
-              pageCount={slice.pageCount}
+              pageCount={realPageCount}
               width={dim.width}
               height={dim.height}
               scale={dim.scale}
