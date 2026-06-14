@@ -1,0 +1,396 @@
+{
+  "items": [
+    {
+      "text": "© 2007 Adobe Systems Incorporated. All rights reserved.",
+      "x": 45,
+      "y": 40.200000000000045,
+      "width": 209.69550000000024,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "",
+      "x": 45,
+      "y": 65.15999999999997,
+      "width": 0,
+      "height": 0,
+      "fontSize": 9
+    },
+    {
+      "text": "Adobe® Acrobat® SDK 8.1 Parameters for Opening PDF Files for Microsoft® Windows®, Mac OS®, Linux®, and UNIX®",
+      "x": 45,
+      "y": 56.15999999999997,
+      "width": 420.9083999999998,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "",
+      "x": 45,
+      "y": 81.17999999999995,
+      "width": 0,
+      "height": 0,
+      "fontSize": 9
+    },
+    {
+      "text": "Edition 1.0, April 2007",
+      "x": 45,
+      "y": 72.17999999999995,
+      "width": 81.49500000000005,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "",
+      "x": 45,
+      "y": 97.20000000000005,
+      "width": 0,
+      "height": 0,
+      "fontSize": 9
+    },
+    {
+      "text": "If this guide is distributed with software that includes an end user agreement, this guide, as well as the software described in it, is furnished",
+      "x": 45,
+      "y": 88.20000000000005,
+      "width": 516.9212999999993,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "under license and may be used or copied only in accordance with the terms of such license. Except as permitted by any such license, no part",
+      "x": 45,
+      "y": 99.18000000000006,
+      "width": 520.1207999999996,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "of this guide may be reproduced, stored in a retrieval system, or transmitted, in any form or by any means, electronic, mechanical, recording,",
+      "x": 45,
+      "y": 110.16000000000008,
+      "width": 520.1262000000005,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "or otherwise, without the prior written permission of Adobe Systems Incorporated. Please note that the content in this guide is protected",
+      "x": 45,
+      "y": 121.20030000000008,
+      "width": 510.4260000000007,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "under copyright law even if it is not distributed with software that includes an end user license agreement.",
+      "x": 45.0009,
+      "y": 132.1803000000001,
+      "width": 396.35729999999916,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "",
+      "x": 45,
+      "y": 157.20000000000005,
+      "width": 0,
+      "height": 0,
+      "fontSize": 9
+    },
+    {
+      "text": "The content of this guide is furnished for informational use only, is subject to change without notice, and should not be construed as a",
+      "x": 45,
+      "y": 148.20000000000005,
+      "width": 499.35779999999977,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "commitment by Adobe Systems Incorporated. Adobe Systems Incorporated assumes no responsibility or liability for any errors or",
+      "x": 45,
+      "y": 159.18000000000006,
+      "width": 480.2544000000006,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "inaccuracies that may appear in the informational content contained in this guide.",
+      "x": 45,
+      "y": 170.22030000000007,
+      "width": 305.8334999999995,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "",
+      "x": 45,
+      "y": 195.17999999999995,
+      "width": 0,
+      "height": 0,
+      "fontSize": 9
+    },
+    {
+      "text": "Please remember that existing artwork or images that you may want to include in your project may be protected under copyright law. The",
+      "x": 45,
+      "y": 186.17999999999995,
+      "width": 513.9080999999998,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "unauthorized incorporation of such material into your new work could be a violation of the rights of the copyright owner. Please be sure to",
+      "x": 44.99909999999994,
+      "y": 197.22029999999995,
+      "width": 516.0753000000001,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "obtain any permission required from the copyright owner.",
+      "x": 44.9991,
+      "y": 208.20029999999997,
+      "width": 216.38340000000017,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "",
+      "x": 45,
+      "y": 233.22000000000003,
+      "width": 0,
+      "height": 0,
+      "fontSize": 9
+    },
+    {
+      "text": "Any references to company names and company logos in sample material are for demonstration purposes only and are not intended to refer",
+      "x": 45,
+      "y": 224.22000000000003,
+      "width": 520.2621000000001,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "to any actual organization.",
+      "x": 45,
+      "y": 235.20000000000005,
+      "width": 99.0954,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "",
+      "x": 45,
+      "y": 260.22,
+      "width": 0,
+      "height": 0,
+      "fontSize": 9
+    },
+    {
+      "text": "Adobe, the Adobe logo, Acrobat and Reader are either registered trademarks or trademarks of Adobe Systems Incorporated in the United",
+      "x": 45,
+      "y": 251.22000000000003,
+      "width": 510.39090000000016,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "States and/or other countries.",
+      "x": 44.99999999999994,
+      "y": 262.20000000000005,
+      "width": 110.78369999999997,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "",
+      "x": 45,
+      "y": 287.22,
+      "width": 0,
+      "height": 0,
+      "fontSize": 9
+    },
+    {
+      "text": "Linux is a registered trademark of Linus Torvalds.",
+      "x": 45,
+      "y": 278.22,
+      "width": 180.82350000000017,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "",
+      "x": 45,
+      "y": 303.18,
+      "width": 0,
+      "height": 0,
+      "fontSize": 9
+    },
+    {
+      "text": "Apple and Mac OS are trademarks of Apple Computer, Inc., registered in the United States and other countries.",
+      "x": 45,
+      "y": 294.18,
+      "width": 410.708699999999,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "",
+      "x": 45,
+      "y": 319.2,
+      "width": 0,
+      "height": 0,
+      "fontSize": 9
+    },
+    {
+      "text": "Microsoft and Windows are either a registered trademark or a trademark of Microsoft Corporation in the United States and/or other",
+      "x": 45,
+      "y": 310.2,
+      "width": 487.86570000000034,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "countries.",
+      "x": 44.99999999999994,
+      "y": 321.18,
+      "width": 36.665099999999995,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "",
+      "x": 45,
+      "y": 346.2,
+      "width": 0,
+      "height": 0,
+      "fontSize": 9
+    },
+    {
+      "text": "UNIX is a registered trademark of The Open Group in the United States and other countries.",
+      "x": 45,
+      "y": 337.2,
+      "width": 339.31889999999953,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "",
+      "x": 45,
+      "y": 362.22,
+      "width": 0,
+      "height": 0,
+      "fontSize": 9
+    },
+    {
+      "text": "All other trademarks are the property of their respective owners.",
+      "x": 45,
+      "y": 353.22,
+      "width": 239.5035000000004,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "",
+      "x": 45,
+      "y": 378.18,
+      "width": 0,
+      "height": 0,
+      "fontSize": 9
+    },
+    {
+      "text": "Adobe Systems Incorporated, 345 Park Avenue, San Jose, California 95110, USA.",
+      "x": 45,
+      "y": 369.18,
+      "width": 295.3449000000001,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "",
+      "x": 45,
+      "y": 394.2,
+      "width": 0,
+      "height": 0,
+      "fontSize": 9
+    },
+    {
+      "text": "Notice to U.S. Government End Users. The Software and Documentation are “Commercial Items,” as that term is defined at 48 C.F.R. §2.101,",
+      "x": 45,
+      "y": 385.2,
+      "width": 513.1709999999991,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "consisting of “Commercial Computer Software” and “Commercial Computer Software Documentation,” as such terms are used in 48 C.F.R.",
+      "x": 44.99999999999994,
+      "y": 396.18,
+      "width": 509.6628000000004,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "§12.212 or 48 C.F.R. §227.7202, as applicable. Consistent with 48 C.F.R. §12.212 or 48 C.F.R. §§227.7202-1 through 227.7202-4, as applicable,",
+      "x": 44.999999999999886,
+      "y": 407.2203,
+      "width": 515.1608999999994,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "the Commercial Computer Software and Commercial Computer Software Documentation are being licensed to U.S. Government end users",
+      "x": 44.999999999999886,
+      "y": 418.2003,
+      "width": 516.5495999999986,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "(a) only as Commercial Items and (b) with only those rights as are granted to all other end users pursuant to the terms and conditions herein.",
+      "x": 45.000899999999774,
+      "y": 429.18030000000005,
+      "width": 520.2260999999986,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "Unpublished-rights reserved under the copyright laws of the United States. Adobe Systems Incorporated, 345 Park Avenue, San Jose, CA",
+      "x": 45.000899999999774,
+      "y": 440.22060000000005,
+      "width": 505.79639999999927,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "95110-2704, USA. For U.S. Government End Users, Adobe agrees to comply with all applicable equal opportunity laws including, if",
+      "x": 45.001799999999776,
+      "y": 451.20060000000007,
+      "width": 482.1614999999995,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "appropriate, the provisions of Executive Order 11246, as amended, Section 402 of the Vietnam Era Veterans Readjustment Assistance Act of",
+      "x": 45.001799999999776,
+      "y": 462.1806000000001,
+      "width": 517.3074000000004,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "1974 (38 USC 4212), and Section 503 of the Rehabilitation Act of 1973, as amended, and the regulations at 41 CFR Parts 60-1 through 60-60,",
+      "x": 45.00179999999972,
+      "y": 473.2209000000001,
+      "width": 518.0499000000004,
+      "height": 9,
+      "fontSize": 9
+    },
+    {
+      "text": "60-250, and 60-741. The affirmative action clause and regulations contained in the preceding sentence shall be incorporated by reference.",
+      "x": 45.00179999999966,
+      "y": 484.2009000000001,
+      "width": 512.9414999999991,
+      "height": 9,
+      "fontSize": 9
+    }
+  ]
+}

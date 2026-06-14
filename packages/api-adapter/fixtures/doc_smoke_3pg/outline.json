@@ -1,0 +1,46 @@
+{
+  "items": [
+    {
+      "title": "Contents",
+      "pageIndex": 0
+    },
+    {
+      "title": "Preface",
+      "pageIndex": 0,
+      "children": [
+        {
+          "title": "Who should read this guide?",
+          "pageIndex": 0
+        },
+        {
+          "title": "Related documentation",
+          "pageIndex": 0
+        }
+      ]
+    },
+    {
+      "title": "Parameters for Opening PDF Files",
+      "pageIndex": 0,
+      "children": [
+        {
+          "title": "Parameters",
+          "pageIndex": 0
+        },
+        {
+          "title": "Specifying parameters in a URL",
+          "pageIndex": 0,
+          "children": [
+            {
+              "title": "URL examples",
+              "pageIndex": 0
+            },
+            {
+              "title": "URL limitations",
+              "pageIndex": 0
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

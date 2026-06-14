@@ -1,0 +1,43 @@
+{
+  "name": "@flipbookjs/api-adapter",
+  "version": "1.0.0",
+  "description": "Pre-rendered artifact bundle adapter for @flipbookjs/react-viewer",
+  "type": "module",
+  "browser": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch"
+  },
+  "peerDependencies": {
+    "@flipbookjs/react-viewer": "^1.0.0"
+  },
+  "keywords": [
+    "react",
+    "pdf",
+    "flipbook",
+    "viewer",
+    "pre-rendered",
+    "artifact-bundle"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/flipbookjs/react-flipbook"
+  },
+  "engines": {
+    "node": ">=20.19"
+  },
+  "devDependencies": {
+    "@napi-rs/canvas": "^0.1.100"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "manifestVersion": 1,
+  "documentId": "doc_smoke_3pg",
+  "contentHash": "sha256:12fc6bd0d8f2d0de1ef358319987b78c2767bc506e02cb70f7eb4f64e6101a98",
+  "status": "ready",
+  "generatedAt": "2026-06-14T17:30:00Z",
+  "pageCount": 3,
+  "defaults": {
+    "widths": [512, 1024, 2048, 4096],
+    "format": "webp",
+    "tierUrlTemplate": "pages/{page}/width-{width}.{format}",
+    "sidecarUrlTemplate": "pages/{page}/{sidecar}.json",
+    "pageNumberDigits": 4
+  },
+  "pages": [
+    { "size": [594, 792], "rotation": 0 },
+    { "size": [594, 792], "rotation": 0 },
+    { "size": [594, 792], "rotation": 0 }
+  ],
+  "documentArtifacts": {
+    "outline": "outline.json",
+    "search": "search.json",
+    "seo": "seo.json",
+    "accessibilityReport": "accessibility-report.json",
+    "sourcePdf": "source.pdf"
+  }
+}

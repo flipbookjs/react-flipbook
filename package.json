@@ -8,7 +8,7 @@
   ],
   "scripts": {
     "dev": "cd demo && npm run dev",
-    "build": "cd packages/viewer && npm run build",
+    "build": "npm -w packages/viewer run build && npm -w packages/api-adapter run build",
     "test": "vitest run",
     "lint": "eslint 'packages/*/src/**/*.{ts,tsx}' 'demo/src/**/*.{ts,tsx}'"
   },
