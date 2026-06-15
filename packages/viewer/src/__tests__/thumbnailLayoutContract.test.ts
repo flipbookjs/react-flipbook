@@ -64,6 +64,14 @@ describe('.fbjs-thumbnail-panel layout contract', () => {
     expect(body).not.toMatch(/height:\s*100%/);
   });
 
+  it('thumbnails.css pins the WCAG touch-target floor (min-width 80px on the button)', () => {
+    // Plan §5: defense-in-depth against consumer stylesheets overriding
+    // the JS-set inline width below the usable touch range. Matches the
+    // 80 px clamp inside `resolveItemDimensions`.
+    const body = ruleBody(readStyle('thumbnails.css'), '.fbjs-thumbnail-button');
+    expect(body).toMatch(/min-width:\s*80px/);
+  });
+
   it('thumbnails.css does NOT flex-grow the canvas host', () => {
     // Plan §3: `.fbjs-thumbnail-button__canvas-host { flex: 1 }` overrode
     // the inline `height` from `resolveItemDimensions` — the root cause

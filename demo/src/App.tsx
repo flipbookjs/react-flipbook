@@ -9,13 +9,13 @@ function App() {
   return (
     <div style={{ width: '100%', height: '100%' }}>
       <Flipbook
-        url="/LDEO%20Annual%20Report%202021%20-%20Print%20Version.pdf"
+        url="/Aerospace%20Engineering.pdf"
         viewMode="auto"
         enablePageCurl
         toolbar={true}
         compact={false}
-        title="LDEO Annual Report 2021"
-        documentName="LDEO Annual Report 2021"
+        title="Aerospace Engineering"
+        documentName="Aerospace Engineering"
         showPrint
         showDownload
         showFullScreen

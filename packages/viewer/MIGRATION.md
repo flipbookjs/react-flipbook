@@ -413,6 +413,8 @@ Additive evolution does NOT require a major-version bump and does NOT break exis
 
 The `2.0.0` migration plan will ship with a separate MIGRATION-v2.md guide listing every breaking change, the equivalent v1 → v2 replacement, and any deprecation aid (e.g., codemods or runtime warnings landed in late `1.x` releases).
 
+**2.0.0 status:** the `thumbnailSize` prop was removed in `2.0.0` and replaced by the `thumbnailDensity` / `thumbnailWidth` discriminated union (on `<Flipbook>`) and `density` / `width` (on `<ThumbnailPanel>`). See `MIGRATION-v2.md` for the full migration table. The §10 stability surface above otherwise carries forward unchanged into `2.x` for every other prop, hook, action, state field, and CSS class — `thumbnailSize` is the only breaking surface change.
+
 ### What's deferred to a future MINOR release (not breaking)
 
 See §11 for the forward-compatibility plan: text content extraction (v0.2 work, now planned for a `1.x` minor), link annotations, document outline, i18n via `ToolbarLabelsContext`. All additive.

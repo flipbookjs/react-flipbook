@@ -20,6 +20,22 @@ import type { VisibilityProps } from './toolbar/resolveToolbarVisibility';
 // bundlers DCE the Set.has / Set.add calls along with `devWarn`.
 const warnedDeprecations = new Set<string>();
 
+// Module-level dedup for the 2.0 both-supplied (thumbnailDensity +
+// thumbnailWidth) warn. Same once-per-process pattern as
+// `warnedDeprecations`. Declared at MODULE SCOPE (NOT inside the Flipbook
+// function body) so the flag survives across renders; declared inside the
+// component it would reset every call and the warn would fire once per
+// render instead of once per process.
+const warnedFlipbookBothSupplied = { triggered: false };
+function warnOnceFlipbookBothSupplied(): void {
+  if (process.env.NODE_ENV === 'production') return;
+  if (warnedFlipbookBothSupplied.triggered) return;
+  warnedFlipbookBothSupplied.triggered = true;
+  devWarn(
+    `Flipbook: both thumbnailDensity and thumbnailWidth are supplied; thumbnailWidth wins. Drop one to silence this warning.`,
+  );
+}
+
 /**
  * Duck-type guard for the slot-object variant of `toolbar`. Distinguishes
  * `{ top?: ReactNode; bottom?: ReactNode }` from a single ReactNode. A
@@ -40,8 +56,10 @@ function isSlotObject(value: unknown): value is { top?: ReactNode; bottom?: Reac
 
 // Common to both variants. Every field that was on the 0.1.0-alpha.1 `FlipbookProps`
 // (other than the toolbar-variant-specific `toolbar`, `compact`, `title`) lives
-// here unchanged with its existing JSDoc. NEW in 1.0.0: `initialInteractionMode`,
-// `thumbnailSize`, `children`.
+// here unchanged with its existing JSDoc. The thumbnail sizing surface is
+// declared separately on `FlipbookSizingProps` (below), which `FlipbookProps`
+// composes with via intersection so the discriminated union prevents
+// supplying both density and width at the type level.
 interface FlipbookCommonProps {
   url?: string;
   source?: PageSource;
@@ -125,12 +143,6 @@ interface FlipbookCommonProps {
    *  text selection (default). Uncontrolled — to change at runtime, dispatch
    *  `actions.setInteractionMode()`. Mirrors the `initialTheme` pattern. */
   initialInteractionMode?: 'select' | 'pan';
-  /** Bounding-box width of built-in thumbnail items. When omitted, the panel
-   *  preserves 0.1.0-alpha.1 sizing (per-page `pageWidth × 0.2`). When supplied,
-   *  tokens map to 360 / 480 / 720 px; an explicit number is the literal
-   *  pixel width for responsive layouts. Height per item derives from each
-   *  page's actual aspect ratio. */
-  thumbnailSize?: 'small' | 'default' | 'large' | number;
   /** Optional children mounted inside the provider context, alongside the
    *  viewer chrome. Use this to mount effect-host components that call
    *  `useFlipbook` / `useFlipbookActions` / `useFlipbookSelector` from
@@ -208,7 +220,36 @@ interface FlipbookCustomToolbarProps extends FlipbookCommonProps {
   // interface JSDoc above for the document-behavior rationale.
 }
 
-export type FlipbookProps = FlipbookBuiltinToolbarProps | FlipbookCustomToolbarProps;
+/** Discriminated union enforcing single-supply of the 2.0 sizing surface
+ *  at the type level. Callers using the public types can't supply BOTH
+ *  `thumbnailDensity` AND `thumbnailWidth` without a TypeScript error.
+ *
+ *  - `thumbnailDensity?: 'compact' | 'comfortable' | 'spacious'` — relative,
+ *    container-adaptive. Default `'comfortable'` (5 median-width thumbnails
+ *    fit across the panel's content width plus their inter-thumb gaps).
+ *  - `thumbnailWidth?: number` — absolute pixel width. Clamped to
+ *    [80, 2048] at the prop boundary with a dev-warn for values above the
+ *    ceiling. Width is forwarded directly to every thumbnail; container
+ *    resize doesn't change it.
+ *
+ *  When both somehow arrive at runtime (JS-side bypass via `as any` or an
+ *  untyped caller), the panel uses `thumbnailWidth` and emits a one-shot
+ *  dev-warn. The composable `<ThumbnailPanel>` surface uses unprefixed
+ *  prop names (`density` / `width`) — see `ThumbnailPanelProps`.
+ *
+ *  Same resolution semantics on both surfaces; the prop-name difference
+ *  is API-surface-only. See `MIGRATION-v2.md` for the 1.x `thumbnailSize`
+ *  → 2.0 migration table. */
+type FlipbookSizingProps =
+  | { thumbnailDensity?: 'compact' | 'comfortable' | 'spacious'; thumbnailWidth?: never }
+  | { thumbnailDensity?: never; thumbnailWidth: number };
+
+/** Cross-product of (toolbar variant) × (sizing variant). Equivalent to
+ *  the explicit four-cell union (BuiltinDensity | BuiltinWidth |
+ *  CustomDensity | CustomWidth) but expressed as an intersection so the
+ *  existing toolbar discriminated union is preserved verbatim. */
+export type FlipbookProps =
+  (FlipbookBuiltinToolbarProps | FlipbookCustomToolbarProps) & FlipbookSizingProps;
 
 export function Flipbook({
   url,
@@ -229,7 +270,8 @@ export function Flipbook({
   compact,
   title,
   documentName,
-  thumbnailSize,
+  thumbnailDensity,
+  thumbnailWidth,
   children,
   showPrint,
   showDownload,
@@ -246,6 +288,13 @@ export function Flipbook({
   onPrintError,
   onPrintAbort,
 }: FlipbookProps) {
+  // Both-supplied dev-warn (Flipbook surface). TypeScript prevents this
+  // for typed callers; JS-side bypass triggers the once-per-process warn.
+  // Precedence (forwarded below): width wins.
+  if (thumbnailDensity !== undefined && thumbnailWidth !== undefined) {
+    warnOnceFlipbookBothSupplied();
+  }
+
   const internalSource = useMemo(
     () => (url ? new PdfjsSource(url) : null),
     [url],
@@ -344,9 +393,20 @@ export function Flipbook({
   // `fallback={() => null}` means a crashed panel silently disappears —
   // toolbar + document remain functional. The function form is required:
   // `ErrorBoundary`'s `fallback` prop is typed `(error: Error) => ReactNode`.
+  //
+  // Forwarding: the panel's discriminated union takes EITHER `{ width: number }`
+  // OR `{ density?: Density }`, never both. Precedence rule (matches the
+  // both-supplied dev-warn above): explicit `thumbnailWidth` wins over
+  // `thumbnailDensity`. `as const` keeps the TypeScript narrowing precise
+  // so the spread satisfies the panel's discriminated union (without
+  // `as const`, both branches widen to `{ width?: number; density?: ... }`
+  // which fails the union check).
+  const panelSizingProps = thumbnailWidth !== undefined
+    ? ({ width: thumbnailWidth } as const)
+    : ({ density: thumbnailDensity } as const);
   const thumbnailsNode: ReactNode = (
     <ErrorBoundary fallback={() => null}>
-      <ThumbnailPanel size={thumbnailSize} />
+      <ThumbnailPanel {...panelSizingProps} />
     </ErrorBoundary>
   );
 

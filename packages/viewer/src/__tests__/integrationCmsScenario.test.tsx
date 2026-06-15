@@ -11,10 +11,11 @@ import type { PageSource } from '../types/PageSource';
 //   - toolbar={{ top: ... }} → top-slot rendering (the explicit-slot form
 //     documented as preferred over single-ReactNode at MIGRATION.md §6.2).
 //   - initialInteractionMode='pan' seeds state.interactionMode.
-//   - thumbnailSize='small' wired through to ThumbnailPanel (panel is NOT
-//     opened in this scenario — width assertion lives in
-//     thumbnailSize.test.tsx, which uses <ThumbnailsOpener>; here we just
-//     verify the prop is accepted without compile error or runtime warn).
+//   - thumbnailDensity='comfortable' wired through to ThumbnailPanel (panel
+//     is NOT opened in this scenario — visual width assertions live in
+//     thumbnailSize.test.tsx which exercises the resolver directly; here
+//     we just verify the prop is accepted without compile error or
+//     runtime warn).
 //   - children prop forwards a state-capture component into provider
 //     context; initialTheme='dark' seeds state.theme.
 //
@@ -46,7 +47,7 @@ describe('Flipbook 1.0.0 — combined CMS scenario', () => {
         source={makeSource()}
         toolbar={{ top: <span data-testid="ct">CT</span> }}
         initialInteractionMode="pan"
-        thumbnailSize="small"
+        thumbnailDensity="comfortable"
         initialTheme="dark"
       >
         <StateCapture stateRef={stateRef} />
@@ -75,16 +76,17 @@ describe('Flipbook 1.0.0 — combined CMS scenario', () => {
     //    mount via the same lazy-init chain as initialInteractionMode.
     expect(stateRef.current!.theme).toBe('dark');
 
-    // 4. thumbnailSize — accepted without compile error or runtime warn.
+    // 4. thumbnailDensity — accepted without compile error or runtime warn.
     //    No width assertion here: the panel isn't opened in this scenario
     //    (slot-object toolbar replaces the built-in chrome that has the
     //    open trigger), so `[data-page-index]` children don't mount.
-    //    Width assertions live in thumbnailSize.test.tsx, which uses a
-    //    dedicated <ThumbnailsOpener> children component.
+    //    Resolver-level width assertions live in thumbnailSize.test.tsx,
+    //    which calls `resolveItemDimensions` directly.
     //
     //    Sanity check on the discriminated union: this whole render
     //    compiled, which means the slot-object form correctly narrowed to
     //    FlipbookCustomToolbarProps without flagging the (already-absent)
-    //    show*/compact/title props.
+    //    show*/compact/title props, and `thumbnailDensity` satisfied the
+    //    sizing branch of the FlipbookProps intersection.
   });
 });

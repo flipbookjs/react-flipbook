@@ -10,106 +10,48 @@ import {
   type ActiveIndexStore,
 } from './ThumbnailPanelContext';
 import { useThumbnailVirtualization } from './useThumbnailVirtualization';
+import { resolveItemDimensions, trueMedian, type Density } from './resolveItemDimensions';
 import type { PageSource } from '../types/PageSource';
 import { devWarn } from '../core/devWarn';
 
-const THUMB_SCALE = 0.2;
-const SIZE_PX = { small: 360, default: 480, large: 720 } as const;
-const MAX_THUMB_WIDTH = 2048;
-
-// Module-level once-per-bad-value guard for sanitization warnings. Lives in
-// module scope (not React state) so re-renders with the same bad value don't
-// re-warn. Cleared only on full module reload (page reload in dev / HMR).
-//
-// The entire dedup body is gated on `process.env.NODE_ENV !== 'production'`
-// via the early-return in `warnOnceForSize`. `devWarn` alone is DCE-stripped
-// in production, but the surrounding `Set.has` / `Set.add` calls would still
-// execute (and the Set would still grow) without the explicit guard.
-// Wrapping the function body means bundlers eliminate the entire dedup logic
-// in production: no Set growth, no method calls, no runtime cost.
-const warnedSizes = new Set<unknown>();
-function warnOnceForSize(badValue: unknown, message: string): void {
+// Module-level dedup for the both-supplied warn. Lives at module scope (NOT
+// inside the panel component body) so the once-per-process contract holds —
+// declared inside the function it would reset every render. Same pattern as
+// `warnedDeprecations` in Flipbook.tsx:21. Production stays cost-free: the
+// entire guard body is gated on `process.env.NODE_ENV !== 'production'` via
+// the early-return, so bundlers DCE the assignment and the devWarn call.
+const warnedPanelBothSupplied = { triggered: false };
+function warnOncePanelBothSupplied(): void {
   if (process.env.NODE_ENV === 'production') return;
-  if (warnedSizes.has(badValue)) return;
-  warnedSizes.add(badValue);
-  devWarn(message);
+  if (warnedPanelBothSupplied.triggered) return;
+  warnedPanelBothSupplied.triggered = true;
+  devWarn(
+    `ThumbnailPanel: both density and width are supplied; width wins. Drop one to silence this warning.`,
+  );
 }
 
-/**
- * Resolve per-page render dimensions from the `size` prop + the source page
- * dimensions. Returns CSS layout `{ width, height }` AND the per-page render
- * `scale` (page-relative, DPR not included). The scale is consumed by
- * `<ThumbnailCanvas>` for its backing-store render — keeping CSS layout and
- * canvas rasterization in lockstep across `thumbnailSize` values.
+/** Public props for `<ThumbnailPanel>`. The 2.0 discriminated union prevents
+ *  supplying BOTH `density` AND `width` at the type level (callers using
+ *  the public types get a TS error). A JS-side bypass (untyped caller,
+ *  `as any` cast) is caught at runtime by the `warnedPanelBothSupplied`
+ *  guard above.
  *
- *   - `size === undefined` (omitted) → preserves 0.1.0-alpha.1 behavior: per-page
- *     `pageWidth × 0.2`, `pageHeight × 0.2`, scale `0.2`.
- *   - Token (`'small' | 'default' | 'large'`) → maps to fixed itemWidth
- *     (360 / 480 / 720 px); scale = `itemWidth / pageWidth`.
- *   - Numeric → literal pixel itemWidth, with sanitization:
- *       - NaN / Infinity / ≤0 → falls back to `'default'` (480 px) with a
- *         once-per-bad-value dev-warn.
- *       - >MAX_THUMB_WIDTH (2048) → clamps to the cap with a dev-warn.
+ *  - `density?: 'compact' | 'comfortable' | 'spacious'` — relative density.
+ *    Default `'comfortable'` (5 median-width thumbnails fit across the
+ *    panel's content width, plus their inter-thumb gaps). Pixel widths
+ *    adapt to the panel's container — embed in a 400 px sidebar and the
+ *    thumbnails shrink accordingly.
+ *  - `width?: number` — absolute pixel width per thumbnail. Clamped to
+ *    [80, 2048]; values outside the range clamp at the prop boundary with
+ *    a dev-warn for values above the ceiling.
  *
- * Helper choice — `devWarn` (not raw `console.warn`). The codebase precedent
- * is split: defaultScale-after-mount uses `console.warn` (FlipbookProvider:294);
- * printScale / printMaxPages uses `devWarn`. We follow the printScale
- * precedent here — invalid `thumbnailSize` is consumer-visible feedback
- * during dev, silent in production (DCE-stripped). If a future commit unifies
- * the codebase on raw `console.warn`, this resolver moves with it.
- */
-function resolveItemDimensions(
-  size: 'small' | 'default' | 'large' | number | undefined,
-  pageSize: { width: number; height: number },
-): { width: number; height: number; scale: number } {
-  // Omitted → 0.1.0-alpha.1 per-page behavior.
-  if (size === undefined) {
-    return {
-      width: Math.round(pageSize.width * THUMB_SCALE),
-      height: Math.round(pageSize.height * THUMB_SCALE),
-      scale: THUMB_SCALE,
-    };
-  }
-  let itemWidth: number;
-  if (typeof size === 'number') {
-    if (!Number.isFinite(size) || size <= 0) {
-      warnOnceForSize(
-        size,
-        `ThumbnailPanel: thumbnailSize={${size}} is not a valid positive width; falling back to 'default' (${SIZE_PX.default}px).`,
-      );
-      itemWidth = SIZE_PX.default;
-    } else if (size > MAX_THUMB_WIDTH) {
-      warnOnceForSize(
-        size,
-        `ThumbnailPanel: thumbnailSize={${size}} exceeds MAX_THUMB_WIDTH (${MAX_THUMB_WIDTH}); clamping.`,
-      );
-      itemWidth = MAX_THUMB_WIDTH;
-    } else {
-      itemWidth = size;
-    }
-  } else {
-    itemWidth = SIZE_PX[size];
-  }
-  const scale = itemWidth / pageSize.width;
-  return {
-    width: Math.round(itemWidth),
-    height: Math.round(pageSize.height * scale),
-    scale,
-  };
-}
-
-/** Public props for `<ThumbnailPanel>`. Added in 1.0.0 to support
- *  the `<Flipbook thumbnailSize>` prop. Existing zero-arg `<ThumbnailPanel/>`
- *  call sites keep compiling — `size` is optional and its `undefined` branch
- *  preserves 0.1.0-alpha.1 sizing. */
-export interface ThumbnailPanelProps {
-  /** Bounding-box width of each thumbnail item. Omitted → preserves 0.1.0-alpha.1
-   *  behavior (per-page `pageWidth × 0.2`). Tokens map to 360 / 480 / 720 px;
-   *  number is the literal pixel width. Invalid numeric input (NaN / Infinity
-   *  / ≤0) falls back to `'default'` (480 px) with a once-per-bad-value
-   *  dev-warn; values above 2048 px clamp with a dev-warn. */
-  size?: 'small' | 'default' | 'large' | number;
-}
+ *  Note: the `<Flipbook>` parent surface uses the namespaced names
+ *  `thumbnailDensity` / `thumbnailWidth`. The panel's direct-composable
+ *  surface uses the shorter unprefixed names since the component name
+ *  already provides the context. See `MIGRATION-v2.md`. */
+export type ThumbnailPanelProps =
+  | { density?: Density; width?: never }
+  | { density?: never; width: number };
 
 interface ThumbnailPanelSlice {
   isOpen: boolean;
@@ -134,7 +76,7 @@ interface ThumbnailPanelSlice {
  *     scroll container's `scrollHeight` and applies it as an inline
  *     `max-height` on the outer shell, so the CSS transition animates
  *     from 0 to the measured content height. A `ResizeObserver` keeps the
- *     value live across thumbnailSize / source rotations.
+ *     value live across `density` / `width` / source rotations.
  *
  * When open: renders one `<ThumbnailButton>` per page; virtualizes
  * canvas-rendering via `useThumbnailVirtualization` so only the
@@ -144,8 +86,13 @@ interface ThumbnailPanelSlice {
  * displays).
  *
  * Per-page sizing computed from `PageSource.getPageSize(idx)` (sync
- * post-init) scaled by `THUMB_SCALE = 0.2`. Per-page sizing supports
- * mixed-orientation PDFs.
+ * post-init) routed through `resolveItemDimensions` (extracted to its
+ * own file for unit testing). Per-page heights derive from each page's
+ * actual aspect ratio. In density mode, per-page WIDTHS scale relative
+ * to the document's TRUE-MEDIAN page width — so mixed-orientation PDFs
+ * preserve their visual variety while still hitting the "N median-width
+ * thumbnails fit" target on average. In explicit-width mode every page
+ * gets the same width.
  *
  * The panel container has `role="region"` + `aria-label` for AT users.
  * The toggle button (`<ThumbnailsToggleButton>`) reflects `aria-pressed`
@@ -166,7 +113,22 @@ interface ThumbnailPanelSlice {
  * panel-context layer never triggers consumer re-renders. Per-button
  * re-renders are gated by the `useSyncExternalStore` selector flips.
  */
-export const ThumbnailPanel = memo(function ThumbnailPanel({ size }: ThumbnailPanelProps = {}) {
+export const ThumbnailPanel = memo(function ThumbnailPanel(props: ThumbnailPanelProps = {}) {
+  // Destructure both possible shapes of the discriminated union via index
+  // access — TS can't narrow `density`/`width` through a destructure on the
+  // raw union, but reading them as optional indices yields the right runtime
+  // values either way.
+  const density = (props as { density?: Density }).density;
+  const width = (props as { width?: number }).width;
+
+  // Both-supplied dev-warn (panel surface). TypeScript prevents this for
+  // typed callers; JS-side bypass triggers the once-per-process warn.
+  // Precedence: width wins (matches the resolver's resolution order — step 2
+  // explicit-width takes priority over step 3 density).
+  if (density !== undefined && width !== undefined) {
+    warnOncePanelBothSupplied();
+  }
+
   const isMounted = useIsMounted();
   // Source via narrow selector — only re-renders on source rotation
   // (status === 'ready' transition or source object identity change).
@@ -200,14 +162,34 @@ export const ThumbnailPanel = memo(function ThumbnailPanel({ size }: ThumbnailPa
   // live element. Unmount on close → setScrollRoot(null) → hook tears
   // down observers. Both transitions observed.
   const [scrollRoot, setScrollRoot] = useState<HTMLDivElement | null>(null);
-  // Measured open-panel max-height. JS replaces the CSS `max-height: 14rem`
-  // open value so the slide animation transitions between 0 and the actual
-  // content height — letting the panel adapt to whatever the `thumbnailSize`
-  // prop resolves to without the strip clipping the bottoms of the pages.
-  // `null` before first measurement; the open-state inline style only applies
-  // once a real value is present (no `0 → 0` no-op transition on first open).
+  // Measured container metrics: contentWidth (scroll container's clientWidth
+  // minus horizontal padding) AND the inter-thumb gap (CSS column-gap).
+  // Combined into one state object so a single ResizeObserver callback
+  // commits both atomically — avoids interleaved renders where width has the
+  // new value but gap has the old. State persists across close/open cycles;
+  // subsequent opens skip the two-pass first-paint flicker. Trade-off:
+  // resize-while-closed produces a one-frame "snap" on the next open as the
+  // layout effect re-measures and corrects the stale cache; accepted because
+  // the common case (open without intervening resize) gets the fast path.
+  const [containerMetrics, setContainerMetrics] = useState<{
+    contentWidth: number;
+    gapPx: number;
+  } | null>(null);
+  // Measured open-panel max-height. JS replaces a CSS open-state max-height
+  // so the slide animation transitions between 0 and the actual content
+  // height — letting the panel adapt to whatever the resolver produces
+  // without the strip clipping the bottoms of the pages. `null` before
+  // first measurement; the open-state inline style only applies once a
+  // real value is present (no `0 → 0` no-op transition on first open).
   const [openMaxHeight, setOpenMaxHeight] = useState<number | null>(null);
   const buttonsRef = useRef<Map<number, HTMLButtonElement>>(new Map());
+  // Ref-based gate for the ResizeObserver's height-measurement branch. Read
+  // through a ref inside the observer callback so the observer doesn't get
+  // rebuilt every time `dimensions` flips null → non-null. Effect-dep-based
+  // gating would tear down and rebuild the observer on every flip — a
+  // sub-microsecond gap during which a resize would be missed. The ref
+  // pattern keeps one observer alive for the scrollRoot's lifetime.
+  const dimensionsReadyRef = useRef(false);
 
   // ActiveIndexStore — created ONCE per panel mount via useRef lazy
   // init. Stable identity for the panel's lifetime; context value
@@ -235,42 +217,6 @@ export const ThumbnailPanel = memo(function ThumbnailPanel({ size }: ThumbnailPa
   useIsomorphicLayoutEffect(() => {
     store.set(slice.pageNumber - 1);
   }, [slice.pageNumber, store]);
-
-  // Measure the scroll container's content height and expose it as the
-  // open-panel `max-height`. `scrollRoot` is the state-tracked __scroll
-  // element (mounts only when the panel is open + source ready). When it
-  // mounts, read `scrollHeight` — the intrinsic content height regardless
-  // of any cap. A ResizeObserver catches subsequent changes (thumbnailSize
-  // prop change at runtime, source rotation to a PDF with a different
-  // aspect ratio, font scaling that shifts the page-number label height).
-  //
-  // On close: `scrollRoot` becomes `null`, the cleanup function runs
-  // `ro.disconnect()`, the observer is gone. The React state
-  // `openMaxHeight` persists across the close at the previous open's
-  // measured value so the next open starts the slide animation at the
-  // right target immediately (no flicker before re-measurement).
-  //
-  // Hook choice: `useIsomorphicLayoutEffect` (not raw `useLayoutEffect`)
-  // matches the existing page-number sync effect above. ThumbnailPanel's
-  // render body returns `null` during SSR via the `useIsMounted` gate, so
-  // the layout-effect path never runs server-side regardless — but using
-  // the isomorphic helper keeps the file consistent and avoids React's
-  // "useLayoutEffect does nothing on the server" warning if the gate is
-  // ever lifted.
-  useIsomorphicLayoutEffect(() => {
-    if (!scrollRoot) {
-      return;
-    }
-    const measure = () => {
-      setOpenMaxHeight(scrollRoot.scrollHeight);
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(scrollRoot);
-    return () => {
-      ro.disconnect();
-    };
-  }, [scrollRoot]);
 
   const registerButton = useCallback((pageIndex: number, element: HTMLButtonElement | null) => {
     if (element === null) {
@@ -319,24 +265,110 @@ export const ThumbnailPanel = memo(function ThumbnailPanel({ size }: ThumbnailPa
     itemSelector: '[data-page-index]',
   });
 
-  // Compute per-page dimensions (synchronous, getPageSize is post-init).
-  // Memoized on (source, status, pageCount, size) — re-runs when source
-  // rotates OR when the consumer changes the `thumbnailSize` prop. Without
-  // `size` in the deps, a prop change would return stale cached dimensions
-  // and the thumbnails would appear non-reactive to runtime size changes.
-  // `slice.pageCount` is kept in the deps so a SOURCE_CHANGED dispatch that
+  // Doc-level metrics: changes only when source rotates. Caches the
+  // pageSizes vector + TRUE median pageWidth (the reference for per-page
+  // density scaling). The sort runs once per source change, not once per
+  // container-resize tick — critical for long PDFs.
+  //
+  // `slice.pageCount` is in the deps so a SOURCE_CHANGED dispatch that
   // updates the reducer (one tick after source rotation) still triggers a
-  // memo re-run even though the body only reads `realPageCount`.
-  const dimensions = useMemo(() => {
+  // memo re-run even though the body reads `source.getPageCount()` (the
+  // live, source-truth value).
+  const referenceMetrics = useMemo(() => {
     if (slice.status !== 'ready' || source === null) return null;
     const count = source.getPageCount();
-    const result: Array<{ width: number; height: number; scale: number }> = [];
-    for (let i = 0; i < count; i++) {
-      const pageSize = source.getPageSize(i);
-      result.push(resolveItemDimensions(size, pageSize));
-    }
-    return result;
-  }, [source, slice.status, slice.pageCount, size]);
+    if (count === 0) return { pageSizes: [] as Array<{ width: number; height: number }>, referenceWidth: 1 };
+
+    const pageSizes: Array<{ width: number; height: number }> = [];
+    for (let i = 0; i < count; i++) pageSizes.push(source.getPageSize(i));
+    const sortedWidths = pageSizes.map((s) => s.width).sort((a, b) => a - b);
+    // `trueMedian` returns 1 for empty input (already guarded above) and
+    // the textbook median otherwise. The `|| 1` guards the degenerate
+    // case where every page width is 0 (would propagate as a NaN multiplier
+    // downstream in the per-page width scaling).
+    const referenceWidth = trueMedian(sortedWidths) || 1;
+    return { pageSizes, referenceWidth };
+  }, [source, slice.status, slice.pageCount]);
+
+  // Per-resize / per-prop dimensions vector. O(N) only — no sort, no
+  // getPageSize calls. Re-runs on container resize (containerMetrics
+  // identity change) OR prop change (density / width).
+  const dimensions = useMemo(() => {
+    if (!referenceMetrics || containerMetrics === null) return null;
+    const { pageSizes, referenceWidth } = referenceMetrics;
+    return pageSizes.map((ps) =>
+      resolveItemDimensions(
+        density,
+        width,
+        ps,
+        containerMetrics.contentWidth,
+        referenceWidth,
+        containerMetrics.gapPx,
+      ),
+    );
+  }, [referenceMetrics, density, width, containerMetrics]);
+
+  // Keep the gate-ref in sync with the dimensions state. Reading through
+  // a ref inside the observer callback (rather than as an effect dep) is
+  // what avoids tearing down and rebuilding the observer on every flip.
+  useIsomorphicLayoutEffect(() => {
+    dimensionsReadyRef.current = dimensions !== null;
+  }, [dimensions]);
+
+  // ResizeObserver lifecycle. ONE observer per scrollRoot mount. Cache
+  // padX + gapPx once via getComputedStyle (forces style resolution — ~10x
+  // clientWidth cost; not worth running on every resize). Both are static
+  // per stylesheet — re-reading them on every fire would defend against a
+  // scenario (live padding/gap change) that doesn't happen in practice.
+  //
+  // No rAF throttle. ResizeObserver already fires at most once per layout
+  // pass (browser-coalesced). rAF would defer the setState into the next
+  // frame's callback queue, lagging the visible resize response by one
+  // frame for no benefit.
+  useIsomorphicLayoutEffect(() => {
+    if (!scrollRoot) return;
+
+    const computed = getComputedStyle(scrollRoot);
+    const parsePx = (v: string) => {
+      const n = parseFloat(v);
+      return Number.isFinite(n) ? n : 0;
+    };
+    const padX = parsePx(computed.paddingLeft) + parsePx(computed.paddingRight);
+    // CSS `gap` shorthand resolves to `column-gap` for flex containers;
+    // read `columnGap` directly — `gap` itself is not always exposed.
+    const gapPx = parsePx(computed.columnGap || computed.gap || '0');
+
+    const measure = () => {
+      setContainerMetrics({
+        contentWidth: Math.max(0, scrollRoot.clientWidth - padX),
+        gapPx,
+      });
+      // Gated height measurement: only commit `openMaxHeight` once
+      // dimensions have resolved AND the buttons have committed —
+      // otherwise the empty scroll-shell's scrollHeight (just the
+      // padding) would commit and produce a multi-step transition
+      // visible as a stutter on first open.
+      if (dimensionsReadyRef.current) {
+        setOpenMaxHeight(scrollRoot.scrollHeight);
+      }
+    };
+    measure();
+
+    const ro = new ResizeObserver(measure);
+    ro.observe(scrollRoot);
+
+    return () => ro.disconnect();
+  }, [scrollRoot]);
+
+  // Trigger one extra measure pass when dimensions flips null → non-null,
+  // so openMaxHeight catches up with the now-mounted buttons. Does NOT
+  // rebuild the observer; the next ResizeObserver fire would also catch
+  // it, but doing it eagerly removes one frame of "open at maxHeight=null"
+  // delay before the first slide-animation paint.
+  useIsomorphicLayoutEffect(() => {
+    if (!scrollRoot || dimensions === null) return;
+    setOpenMaxHeight(scrollRoot.scrollHeight);
+  }, [scrollRoot, dimensions]);
 
   if (!isMounted) return null;
 
@@ -351,27 +383,36 @@ export const ThumbnailPanel = memo(function ThumbnailPanel({ size }: ThumbnailPa
   // ARIA: `aria-hidden="true"` when closed removes the empty region from the
   // accessibility tree so AT users don't get announced "Page thumbnails" on
   // initial mount before interaction.
-  const inner =
-    slice.isOpen && slice.status === 'ready' && source !== null && dimensions !== null ? (
-      <div ref={setScrollRoot} className="fbjs-thumbnail-panel__scroll">
-        {Array.from({ length: realPageCount }, (_, i) => {
-          const dim = dimensions[i];
-          const inWindow = i >= visibleRange.start && i < visibleRange.end;
-          return (
-            <ThumbnailButton
-              key={i}
-              source={source as PageSource}
-              pageIndex={i}
-              pageCount={realPageCount}
-              width={dim.width}
-              height={dim.height}
-              scale={dim.scale}
-              inWindow={inWindow}
-            />
-          );
-        })}
-      </div>
-    ) : null;
+  //
+  // Scroll container shell mounts unconditionally when open (NOT gated on
+  // `dimensions !== null`). The shell is the ResizeObserver target — gating
+  // it on `dimensions` would create a chicken-and-egg: dimensions depends
+  // on containerMetrics, containerMetrics needs the shell to exist, but the
+  // shell wouldn't render until dimensions resolved. Splitting shell from
+  // button-list breaks the cycle: the shell mounts → ResizeObserver attaches
+  // → containerMetrics resolves → dimensions resolves → button list mounts.
+  const inner = slice.isOpen && slice.status === 'ready' && source !== null ? (
+    <div ref={setScrollRoot} className="fbjs-thumbnail-panel__scroll">
+      {dimensions !== null
+        ? Array.from({ length: realPageCount }, (_, i) => {
+            const dim = dimensions[i];
+            const inWindow = i >= visibleRange.start && i < visibleRange.end;
+            return (
+              <ThumbnailButton
+                key={i}
+                source={source as PageSource}
+                pageIndex={i}
+                pageCount={realPageCount}
+                width={dim.width}
+                height={dim.height}
+                scale={dim.scale}
+                inWindow={inWindow}
+              />
+            );
+          })
+        : null}
+    </div>
+  ) : null;
 
   return (
     <ThumbnailPanelContext.Provider value={panelCtxValue}>

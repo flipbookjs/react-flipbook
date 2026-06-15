@@ -12,9 +12,10 @@ interface ThumbnailButtonProps {
   width: number;
   height: number;
   /** Page-relative render scale (DPR not included). Computed by
-   *  ThumbnailPanel.resolveItemDimensions; passed through to ThumbnailCanvas
-   *  for its backing-store render. Keeps CSS layout + canvas rasterization
-   *  in lockstep across `thumbnailSize` values. */
+   *  `resolveItemDimensions` (in `./resolveItemDimensions.ts`); passed
+   *  through to ThumbnailCanvas for its backing-store render. Keeps CSS
+   *  layout + canvas rasterization in lockstep across
+   *  `thumbnailDensity` / `thumbnailWidth` values. */
   scale: number;
   inWindow: boolean;       // from useThumbnailVirtualization
 }

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { FlipbookProvider } from '../FlipbookProvider';
 import { ThumbnailPanel } from '../thumbnails/ThumbnailPanel';
@@ -328,5 +328,157 @@ describe('ThumbnailPanel', () => {
     expect(closedOuter).toBe(initialOuter);   // SAME DOM node across the whole open/close cycle
     expect(closedOuter).toHaveAttribute('data-open', 'false');
     expect(closedOuter).toHaveAttribute('aria-hidden', 'true');
+  });
+});
+
+// ============================================================================
+// §7.2 Container-resize-reflow + mixed-page-size scenarios.
+//
+// The implementation reads `computed.paddingLeft`, `computed.paddingRight`,
+// `computed.columnGap`, and `computed.gap` (as a fallback). jsdom's
+// `getComputedStyle` does NOT expand the `padding` shorthand into its
+// individual side properties — the mock must populate exactly the longhand
+// properties the implementation reads. Similarly jsdom returns 0 for
+// `clientWidth` and `scrollHeight` regardless of CSS, so those are mocked
+// via `Object.defineProperty` (same pattern as the 1.0.3 `openMaxHeight`
+// test above).
+// ============================================================================
+describe('ThumbnailPanel — container-resize reflow (§7.2)', () => {
+  // Mock setup at test scope. Replaces window.getComputedStyle just for the
+  // scroll container so the implementation reads padX=24 + gapPx=8 instead
+  // of jsdom's empty strings (which would degrade to 0 → wrong expected
+  // widths → tests pass for the wrong reason).
+  let origGetComputedStyle: typeof window.getComputedStyle;
+
+  beforeEach(() => {
+    origGetComputedStyle = window.getComputedStyle;
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((el: Element) => {
+      if ((el as HTMLElement).classList?.contains('fbjs-thumbnail-panel__scroll')) {
+        return {
+          paddingLeft: '12px',
+          paddingRight: '12px',
+          columnGap: '8px',
+          gap: '8px',
+        } as unknown as CSSStyleDeclaration;
+      }
+      return origGetComputedStyle.call(window, el);
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function fireLastObserver(width: number, height: number): void {
+    const observers = (globalThis as unknown as {
+      __resizeObservers: Array<{ _fireResize: (w: number, h: number) => void }>;
+    }).__resizeObservers;
+    observers[observers.length - 1]._fireResize(width, height);
+  }
+
+  it('uniform-page PDF reflows on container resize (1924 → 1024)', async () => {
+    // Uniform 612x792 source → median pageWidth = 612 → per-page scale = 1.
+    // Comfortable density (target=10), gap=8, padding=24:
+    //   clientWidth=1924 → contentWidth=1900 → unitWidth=(1900-72)/10=182.8 → floor 182
+    //   clientWidth=1024 → contentWidth=1000 → unitWidth=(1000-72)/10=92.8 → floor 92
+    const source = makeSource(4);
+    const actionsRef = { current: null as FlipbookHookActions | null };
+    const { container } = render(
+      <FlipbookProvider source={source}>
+        <CaptureActions actionsRef={actionsRef} />
+        <ThumbnailPanel density="comfortable" />
+      </FlipbookProvider>,
+    );
+    act(() => { actionsRef.current!.setThumbnailsOpen(true); });
+    await waitFor(() => {
+      expect(container.querySelector('.fbjs-thumbnail-panel__scroll')).not.toBeNull();
+    });
+    const scrollEl = container.querySelector('.fbjs-thumbnail-panel__scroll') as HTMLElement;
+
+    // Mock clientWidth=1924 and fire the observer so measure() re-runs
+    // with the new value. (The first measure ran with clientWidth=0 — that
+    // committed a degenerate state; this re-fire is what surfaces the
+    // assertable behavior under the jsdom-mock constraints.)
+    Object.defineProperty(scrollEl, 'clientWidth', { configurable: true, value: 1924 });
+    await act(async () => { fireLastObserver(1924, 0); });
+
+    let thumb0 = container.querySelector('[data-page-index="0"]') as HTMLElement;
+    expect(thumb0.style.width).toBe('182px');
+
+    // Resize to clientWidth=1024.
+    Object.defineProperty(scrollEl, 'clientWidth', { configurable: true, value: 1024 });
+    await act(async () => { fireLastObserver(1024, 0); });
+
+    thumb0 = container.querySelector('[data-page-index="0"]') as HTMLElement;
+    expect(thumb0.style.width).toBe('92px');
+  });
+
+  it('mixed-page-size PDF preserves per-page widths via true median', async () => {
+    // Two-page source: portrait (612x792) and landscape (792x612).
+    // True median pageWidth = (612 + 792) / 2 = 702.
+    // Comfortable density (target=10), gap=8, clientWidth=1924 → contentWidth=1900:
+    //   unitWidth = (1900-72)/10 = 182.8
+    //   portrait: 182.8 × (612/702) = 159.4 → floor 159
+    //   landscape: 182.8 × (792/702) = 206.3 → floor 206
+    const pageSizes = [
+      { width: 612, height: 792 },   // portrait
+      { width: 792, height: 612 },   // landscape
+    ];
+    const mixedSource: PageSource = {
+      init: () => Promise.resolve(),
+      getPageCount: () => pageSizes.length,
+      getPageSize: (i) => pageSizes[i],
+      renderPage: vi.fn(() => Promise.resolve(document.createElement('canvas'))),
+      dispose: () => {},
+    };
+    const actionsRef = { current: null as FlipbookHookActions | null };
+    const { container } = render(
+      <FlipbookProvider source={mixedSource}>
+        <CaptureActions actionsRef={actionsRef} />
+        <ThumbnailPanel density="comfortable" />
+      </FlipbookProvider>,
+    );
+    act(() => { actionsRef.current!.setThumbnailsOpen(true); });
+    await waitFor(() => {
+      expect(container.querySelector('.fbjs-thumbnail-panel__scroll')).not.toBeNull();
+    });
+    const scrollEl = container.querySelector('.fbjs-thumbnail-panel__scroll') as HTMLElement;
+
+    Object.defineProperty(scrollEl, 'clientWidth', { configurable: true, value: 1924 });
+    await act(async () => { fireLastObserver(1924, 0); });
+
+    const portraitThumb = container.querySelector('[data-page-index="0"]') as HTMLElement;
+    const landscapeThumb = container.querySelector('[data-page-index="1"]') as HTMLElement;
+    expect(portraitThumb.style.width).toBe('159px');
+    expect(landscapeThumb.style.width).toBe('206px');
+  });
+
+  it('explicit width is forwarded unchanged regardless of container size', async () => {
+    const source = makeSource(4);
+    const actionsRef = { current: null as FlipbookHookActions | null };
+    const { container } = render(
+      <FlipbookProvider source={source}>
+        <CaptureActions actionsRef={actionsRef} />
+        <ThumbnailPanel width={500} />
+      </FlipbookProvider>,
+    );
+    act(() => { actionsRef.current!.setThumbnailsOpen(true); });
+    await waitFor(() => {
+      expect(container.querySelector('.fbjs-thumbnail-panel__scroll')).not.toBeNull();
+    });
+    const scrollEl = container.querySelector('.fbjs-thumbnail-panel__scroll') as HTMLElement;
+
+    Object.defineProperty(scrollEl, 'clientWidth', { configurable: true, value: 1924 });
+    await act(async () => { fireLastObserver(1924, 0); });
+
+    let thumb0 = container.querySelector('[data-page-index="0"]') as HTMLElement;
+    expect(thumb0.style.width).toBe('500px');
+
+    // Resize to 320 — explicit width is unaffected by container changes.
+    Object.defineProperty(scrollEl, 'clientWidth', { configurable: true, value: 320 });
+    await act(async () => { fireLastObserver(320, 0); });
+
+    thumb0 = container.querySelector('[data-page-index="0"]') as HTMLElement;
+    expect(thumb0.style.width).toBe('500px');
   });
 });

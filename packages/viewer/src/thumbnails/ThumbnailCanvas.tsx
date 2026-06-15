@@ -7,11 +7,12 @@ interface ThumbnailCanvasProps {
   width: number;           // computed CSS pixels (panel-supplied; matches `scale × getPageSize(pageIndex).width`)
   height: number;
   /** Page-relative render scale (DPR not included). The canvas multiplies
-   *  by DPR internally. `ThumbnailPanel.resolveItemDimensions` is the
-   *  single source of truth for this value. Keeping it as a prop (vs the
-   *  0.1.0-alpha.1 module-level `THUMB_SCALE = 0.2` constant) is what lets
-   *  larger `thumbnailSize` values stay crisp on Retina: backing-store
-   *  resolution scales with the displayed CSS size. */
+   *  by DPR internally. `resolveItemDimensions` (in `./resolveItemDimensions.ts`)
+   *  is the single source of truth for this value. Keeping it as a prop
+   *  (vs the 0.1.0-alpha.1 module-level `THUMB_SCALE = 0.2` constant) is
+   *  what lets larger `thumbnailWidth` / `thumbnailDensity` values stay
+   *  crisp on Retina: backing-store resolution scales with the displayed
+   *  CSS size. */
   scale: number;
 }
 
@@ -36,8 +37,9 @@ interface ThumbnailCanvasProps {
  * height = 0`) to release GPU/CPU memory.
  *
  * Memoized: re-renders when `source`, `pageIndex`, or `scale` changes
- * (the latter so a runtime `thumbnailSize` prop change re-rasterizes the
- * page at the new backing-store resolution). `width` / `height` are
+ * (the latter so a runtime `thumbnailDensity` / `thumbnailWidth` prop
+ * change re-rasterizes the page at the new backing-store resolution).
+ * `width` / `height` are
  * CSS-only — applied via inline style on the host div and the rendered
  * canvas — and changes there flow naturally through the parent re-render.
  */

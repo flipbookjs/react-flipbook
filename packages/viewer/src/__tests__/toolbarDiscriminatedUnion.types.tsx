@@ -31,8 +31,8 @@ const ok11 = <Flipbook url="x" toolbar={<div />} enablePageCurl />;
 
 // ----- Valid: new 1.0.0 props on both variants -----
 const ok12 = <Flipbook url="x" initialInteractionMode="pan" />;
-const ok13 = <Flipbook url="x" thumbnailSize="large" />;
-const ok14 = <Flipbook url="x" thumbnailSize={400} />;
+const ok13 = <Flipbook url="x" thumbnailDensity="spacious" />;
+const ok14 = <Flipbook url="x" thumbnailWidth={400} />;
 const ok15 = (
   <Flipbook url="x">
     <span>child mounted inside provider context</span>
