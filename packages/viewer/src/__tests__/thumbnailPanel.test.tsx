@@ -214,6 +214,58 @@ describe('ThumbnailPanel', () => {
     expect(tabbableThumbs[0]).toBe(screen.getByTestId('fbjs-thumbnail-2'));
   });
 
+  // §4 wiring contract: the open panel's inline `max-height` reflects the
+  // scroll container's `scrollHeight`. jsdom returns 0 for `scrollHeight`
+  // regardless of CSS, and the vitest.setup.ts ResizeObserver polyfill
+  // auto-fires on `observe()` — so the first measurement always reads 0.
+  // To verify the JS-driven max-height wiring under controlled fakes:
+  //   1. Open the panel (scrollRoot mounts, layout effect runs, polyfill
+  //      auto-fires with the default contentRect, measure reads scrollHeight=0,
+  //      setOpenMaxHeight(0) commits → inline style "0px").
+  //   2. Mock the scroll element's `scrollHeight` to a controlled value.
+  //   3. Manually re-fire the ResizeObserver callback so `measure()` re-runs
+  //      and reads the NEW `scrollHeight`. Wrap in `act()` so React flushes
+  //      the resulting `setState` before assertion.
+  //   4. Assert the outer panel's inline `maxHeight` reflects the new height.
+  // This proves the state-flip + ResizeObserver-driven re-measure pipeline
+  // without depending on jsdom doing real flex layout.
+  it('open panel applies inline max-height reflecting the scroll container scrollHeight', async () => {
+    const source = makeSource(4);
+    const actionsRef = { current: null as FlipbookHookActions | null };
+    const { container } = render(
+      <FlipbookProvider source={source}>
+        <CaptureActions actionsRef={actionsRef} />
+        <ThumbnailPanel />
+      </FlipbookProvider>,
+    );
+    act(() => { actionsRef.current!.setThumbnailsOpen(true); });
+    // Wait for the scroll container to mount (open-state JSX commits).
+    await waitFor(() => {
+      expect(container.querySelector('.fbjs-thumbnail-panel__scroll')).not.toBeNull();
+    });
+    const scrollEl = container.querySelector('.fbjs-thumbnail-panel__scroll') as HTMLElement;
+    // Mock `scrollHeight` on the actual scroll element so the next
+    // `measure()` reads 400 instead of jsdom's default 0.
+    Object.defineProperty(scrollEl, 'scrollHeight', {
+      configurable: true,
+      value: 400,
+    });
+    // Manually fire the polyfill's ResizeObserver callback. The polyfill
+    // (vitest.setup.ts:48) pushes each instance onto `globalThis.__resizeObservers`
+    // in constructor order, and exposes a per-instance `_fireResize(width, height)`
+    // helper that re-invokes the user callback. The panel's layout-effect
+    // observer is the LAST one registered before this point.
+    await act(async () => {
+      const observers = (globalThis as unknown as {
+        __resizeObservers: Array<{ _fireResize: (w: number, h: number) => void }>;
+      }).__resizeObservers;
+      const ourObserver = observers[observers.length - 1];
+      ourObserver._fireResize(1024, 400);
+    });
+    const outer = container.querySelector('.fbjs-thumbnail-panel') as HTMLElement;
+    expect(outer.style.maxHeight).toBe('400px');
+  });
+
   // Empty-document edge case.
   it('panel handles pageCount=0 without rendering buttons (renders empty region shell)', async () => {
     const source = makeSource(0);

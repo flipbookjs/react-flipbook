@@ -130,8 +130,11 @@ interface ThumbnailPanelSlice {
  *     CSS shrinks it to `max-height: 0` so it takes no visible space;
  *     inner content (scroll container + buttons + canvases) is absent
  *     so canvas memory + observers release.
- *   - When open: outer + inner both render; CSS animates `max-height`
- *     to 14rem.
+ *   - When open: outer + inner both render; a layout effect measures the
+ *     scroll container's `scrollHeight` and applies it as an inline
+ *     `max-height` on the outer shell, so the CSS transition animates
+ *     from 0 to the measured content height. A `ResizeObserver` keeps the
+ *     value live across thumbnailSize / source rotations.
  *
  * When open: renders one `<ThumbnailButton>` per page; virtualizes
  * canvas-rendering via `useThumbnailVirtualization` so only the
@@ -197,6 +200,13 @@ export const ThumbnailPanel = memo(function ThumbnailPanel({ size }: ThumbnailPa
   // live element. Unmount on close → setScrollRoot(null) → hook tears
   // down observers. Both transitions observed.
   const [scrollRoot, setScrollRoot] = useState<HTMLDivElement | null>(null);
+  // Measured open-panel max-height. JS replaces the CSS `max-height: 14rem`
+  // open value so the slide animation transitions between 0 and the actual
+  // content height — letting the panel adapt to whatever the `thumbnailSize`
+  // prop resolves to without the strip clipping the bottoms of the pages.
+  // `null` before first measurement; the open-state inline style only applies
+  // once a real value is present (no `0 → 0` no-op transition on first open).
+  const [openMaxHeight, setOpenMaxHeight] = useState<number | null>(null);
   const buttonsRef = useRef<Map<number, HTMLButtonElement>>(new Map());
 
   // ActiveIndexStore — created ONCE per panel mount via useRef lazy
@@ -225,6 +235,42 @@ export const ThumbnailPanel = memo(function ThumbnailPanel({ size }: ThumbnailPa
   useIsomorphicLayoutEffect(() => {
     store.set(slice.pageNumber - 1);
   }, [slice.pageNumber, store]);
+
+  // Measure the scroll container's content height and expose it as the
+  // open-panel `max-height`. `scrollRoot` is the state-tracked __scroll
+  // element (mounts only when the panel is open + source ready). When it
+  // mounts, read `scrollHeight` — the intrinsic content height regardless
+  // of any cap. A ResizeObserver catches subsequent changes (thumbnailSize
+  // prop change at runtime, source rotation to a PDF with a different
+  // aspect ratio, font scaling that shifts the page-number label height).
+  //
+  // On close: `scrollRoot` becomes `null`, the cleanup function runs
+  // `ro.disconnect()`, the observer is gone. The React state
+  // `openMaxHeight` persists across the close at the previous open's
+  // measured value so the next open starts the slide animation at the
+  // right target immediately (no flicker before re-measurement).
+  //
+  // Hook choice: `useIsomorphicLayoutEffect` (not raw `useLayoutEffect`)
+  // matches the existing page-number sync effect above. ThumbnailPanel's
+  // render body returns `null` during SSR via the `useIsMounted` gate, so
+  // the layout-effect path never runs server-side regardless — but using
+  // the isomorphic helper keeps the file consistent and avoids React's
+  // "useLayoutEffect does nothing on the server" warning if the gate is
+  // ever lifted.
+  useIsomorphicLayoutEffect(() => {
+    if (!scrollRoot) {
+      return;
+    }
+    const measure = () => {
+      setOpenMaxHeight(scrollRoot.scrollHeight);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(scrollRoot);
+    return () => {
+      ro.disconnect();
+    };
+  }, [scrollRoot]);
 
   const registerButton = useCallback((pageIndex: number, element: HTMLButtonElement | null) => {
     if (element === null) {
@@ -336,6 +382,11 @@ export const ThumbnailPanel = memo(function ThumbnailPanel({ size }: ThumbnailPa
         role="region"
         aria-label={LABELS.thumbnailPanelLabel}
         aria-hidden={slice.isOpen ? undefined : 'true'}
+        style={
+          slice.isOpen && openMaxHeight !== null
+            ? { maxHeight: `${openMaxHeight}px` }
+            : undefined
+        }
       >
         {inner}
       </div>
