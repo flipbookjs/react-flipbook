@@ -3,6 +3,7 @@
 @import './thumbnails.css';
 @import './interactionMode.css';
 @import './print.css';
+@import './edge-arrows.css';
 
 .fbjs-container {
   position: relative;

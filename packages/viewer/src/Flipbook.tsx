@@ -8,6 +8,7 @@ import { FlipbookProvider } from './FlipbookProvider';
 import { Toolbar } from './toolbar/Toolbar';
 import { ThumbnailPanel } from './thumbnails/ThumbnailPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { EdgeArrows } from './components/EdgeArrows';
 import { devWarn } from './core/devWarn';
 import type { VisibilityProps } from './toolbar/resolveToolbarVisibility';
 
@@ -143,6 +144,15 @@ interface FlipbookCommonProps {
    *  text selection (default). Uncontrolled — to change at runtime, dispatch
    *  `actions.setInteractionMode()`. Mirrors the `initialTheme` pattern. */
   initialInteractionMode?: 'select' | 'pan';
+  /** Show the edge-tap navigation arrows that overlay on the left and right
+   *  edges of the viewer (vertically centered; fade in on hover; always
+   *  visible on touch). Defaults to `true` since most paginated viewers
+   *  expose these as a primary affordance. Set `false` to opt out (e.g.,
+   *  when the consumer provides their own navigation UI alongside a
+   *  custom toolbar). Independent of toolbar variant — available on both
+   *  the built-in and custom toolbar surfaces. Keyboard navigation
+   *  (←/→ arrow keys) is unaffected by this prop. */
+  showEdgeArrows?: boolean;
   /** Optional children mounted inside the provider context, alongside the
    *  viewer chrome. Use this to mount effect-host components that call
    *  `useFlipbook` / `useFlipbookActions` / `useFlipbookSelector` from
@@ -287,6 +297,7 @@ export function Flipbook({
   onPrintComplete,
   onPrintError,
   onPrintAbort,
+  showEdgeArrows = true,
 }: FlipbookProps) {
   // Both-supplied dev-warn (Flipbook surface). TypeScript prevents this
   // for typed callers; JS-side bypass triggers the once-per-process warn.
@@ -410,6 +421,15 @@ export function Flipbook({
     </ErrorBoundary>
   );
 
+  // EdgeArrows is rendered inside the stage by the provider. Wrapping in
+  // ErrorBoundary keeps a malformed selector / actions hook crash from
+  // taking down the whole viewer chrome — the arrows just disappear.
+  const edgeArrowsNode: ReactNode = showEdgeArrows ? (
+    <ErrorBoundary fallback={() => null}>
+      <EdgeArrows />
+    </ErrorBoundary>
+  ) : null;
+
   return (
     <FlipbookProvider
       source={effectiveSource}
@@ -428,6 +448,7 @@ export function Flipbook({
       toolbarTopNode={toolbarTopNode}
       toolbarBottomNode={toolbarBottomNode}
       thumbnailsNode={thumbnailsNode}
+      edgeArrowsNode={edgeArrowsNode}
       printMaxPages={printMaxPages}
       printScale={printScale}
       printErrorDismissMs={printErrorDismissMs}

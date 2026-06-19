@@ -170,6 +170,12 @@ interface FlipbookProviderProps {
   onExitFullScreen?: () => void;
   /** Top-bar node rendered above the container inside `.fbjs-root`. Computed
    *  by `<Flipbook>` from the `toolbar` prop dispatch. Pass `null` to omit. */
+  /** Edge-tap navigation arrows; rendered inside `.fbjs-stage` when the
+   *  document is ready. Constructed by `<Flipbook />` from the
+   *  `showEdgeArrows` prop; consumers using `<FlipbookProvider />`
+   *  directly can pass any node here (e.g., a custom overlay) or omit
+   *  for none. */
+  edgeArrowsNode?: ReactNode | null;
   toolbarTopNode?: ReactNode | null;
   /** Bottom-bar node rendered below the container inside `.fbjs-root`. */
   toolbarBottomNode?: ReactNode | null;
@@ -242,6 +248,7 @@ export function FlipbookProvider({
   toolbarTopNode = null,
   toolbarBottomNode = null,
   thumbnailsNode = null,
+  edgeArrowsNode = null,
   printMaxPages: printMaxPagesRaw = 100,
   printScale: printScaleRaw = 2.0,
   printErrorDismissMs = 8000,
@@ -1101,6 +1108,12 @@ export function FlipbookProvider({
                     </ErrorBoundary>
                   </div>
                 )}
+                {/* Rendered at container level (NOT inside .fbjs-stage) so the
+                    arrows sit in the gutter / letterbox between the page edge
+                    and the viewer's edge instead of overlaying the document.
+                    Gated on `showContent` so they don't appear during the
+                    loading or error states. */}
+                {showContent && edgeArrowsNode}
               </div>
               {thumbnailsNode}
               {toolbarBottomNode}

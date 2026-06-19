@@ -1,0 +1,101 @@
+/* Edge-tap navigation arrows. Vertically centered on each side of the
+   stage; fade in on hover of the viewer body; always visible on touch
+   devices. Disabled state is grey + non-interactive but still rendered
+   so the user can see where they are in the document. */
+
+.fbjs-edge-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 5;
+
+  /* Hit-area sized for touch (48×48 min); visual content centered inside. */
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  /* Theme-driven; matches the toolbar button surface so hover reveal
+     blends with the existing chrome instead of looking grafted-on. */
+  background: var(--fbjs-edge-arrow-bg, rgba(0, 0, 0, 0.55));
+  color: var(--fbjs-edge-arrow-fg, #fff);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+
+  /* Default hidden — fade in when the viewer container is hovered. */
+  opacity: 0;
+  transition: opacity 200ms ease, background-color 150ms ease, transform 150ms ease;
+}
+
+.fbjs-edge-arrow--prev { left: 16px; }
+.fbjs-edge-arrow--next { right: 16px; }
+
+.fbjs-edge-arrow svg {
+  width: 28px;
+  height: 28px;
+}
+
+/* Reveal on hover of the viewer body, OR when the arrow itself receives
+   keyboard focus (so the focus ring doesn't get hidden by opacity: 0). */
+.fbjs-container:hover .fbjs-edge-arrow,
+.fbjs-edge-arrow:focus-visible {
+  opacity: 1;
+}
+
+.fbjs-edge-arrow:hover {
+  background: var(--fbjs-edge-arrow-bg-hover, rgba(0, 0, 0, 0.75));
+  transform: translateY(-50%) scale(1.06);
+}
+
+.fbjs-edge-arrow:focus-visible {
+  outline: 2px solid var(--fbjs-edge-arrow-focus, #4d9cff);
+  outline-offset: 2px;
+}
+
+.fbjs-edge-arrow[aria-disabled='true'] {
+  opacity: 0;
+  cursor: default;
+  pointer-events: none;
+}
+
+/* When the parent IS being hovered, a disabled arrow still shows as a
+   visible-but-greyed indicator (matches the toolbar Prev/Next convention
+   so the user understands they're at a boundary, not that the control
+   vanished). */
+.fbjs-container:hover .fbjs-edge-arrow[aria-disabled='true'] {
+  opacity: 0.35;
+}
+
+/* Touch devices — no hover concept; arrows should be persistently visible
+   so users on phones/tablets can find them. */
+@media (hover: none) {
+  .fbjs-edge-arrow {
+    opacity: 1;
+  }
+  .fbjs-edge-arrow[aria-disabled='true'] {
+    opacity: 0.35;
+  }
+}
+
+/* Respect reduced-motion preference. */
+@media (prefers-reduced-motion: reduce) {
+  .fbjs-edge-arrow {
+    transition: opacity 0ms;
+  }
+  .fbjs-edge-arrow:hover {
+    transform: translateY(-50%);
+  }
+}
+
+/* Dark theme uses a lighter chip so it stays legible against dark page
+   backgrounds. */
+[data-theme='dark'] .fbjs-edge-arrow {
+  background: var(--fbjs-edge-arrow-bg, rgba(255, 255, 255, 0.18));
+  color: var(--fbjs-edge-arrow-fg, #fff);
+}
+[data-theme='dark'] .fbjs-edge-arrow:hover {
+  background: var(--fbjs-edge-arrow-bg-hover, rgba(255, 255, 255, 0.28));
+}
