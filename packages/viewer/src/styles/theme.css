@@ -77,6 +77,13 @@
   --fbjs-toolbar-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
   --fbjs-border: #e5e7eb;
   --fbjs-overlay-bg: rgba(255, 255, 255, 0.95);
+  /* Edge-arrow chip: near-opaque so chevron contrast is deterministic
+     regardless of page content beneath. Dark chevron on light pill. */
+  --fbjs-edge-arrow-bg: rgba(255, 255, 255, 0.92);
+  --fbjs-edge-arrow-bg-hover: #ffffff;
+  --fbjs-edge-arrow-fg: #1f2937;
+  --fbjs-edge-arrow-focus: #6366f1;
+  --fbjs-edge-arrow-shadow: 0 2px 8px rgb(0 0 0 / 0.18);
 }
 
 .fbjs-root[data-theme='dark'],
@@ -91,6 +98,12 @@
   --fbjs-toolbar-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
   --fbjs-border: #334155;
   --fbjs-overlay-bg: rgba(15, 23, 42, 0.95);
+  /* Edge-arrow chip: near-opaque dark pill, light chevron. */
+  --fbjs-edge-arrow-bg: rgba(15, 23, 42, 0.85);
+  --fbjs-edge-arrow-bg-hover: #0f172a;
+  --fbjs-edge-arrow-fg: #f8fafc;
+  --fbjs-edge-arrow-focus: #818cf8;
+  --fbjs-edge-arrow-shadow: 0 2px 8px rgb(0 0 0 / 0.4);
 }
 
 /*

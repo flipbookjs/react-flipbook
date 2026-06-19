@@ -17,10 +17,13 @@
   align-items: center;
   justify-content: center;
 
-  /* Theme-driven; matches the toolbar button surface so hover reveal
-     blends with the existing chrome instead of looking grafted-on. */
-  background: var(--fbjs-edge-arrow-bg, rgba(0, 0, 0, 0.55));
-  color: var(--fbjs-edge-arrow-fg, #fff);
+  /* Theme-driven; tokens live in theme.css alongside --fbjs-toolbar-*.
+     High-opacity bg + box-shadow keeps chevron contrast deterministic
+     regardless of page content beneath (white pages, photographic pages,
+     dark covers) — the chip is its own surface, not a translucent overlay. */
+  background: var(--fbjs-edge-arrow-bg);
+  color: var(--fbjs-edge-arrow-fg);
+  box-shadow: var(--fbjs-edge-arrow-shadow);
   border: none;
   border-radius: 50%;
   cursor: pointer;
@@ -46,12 +49,12 @@
 }
 
 .fbjs-edge-arrow:hover {
-  background: var(--fbjs-edge-arrow-bg-hover, rgba(0, 0, 0, 0.75));
+  background: var(--fbjs-edge-arrow-bg-hover);
   transform: translateY(-50%) scale(1.06);
 }
 
 .fbjs-edge-arrow:focus-visible {
-  outline: 2px solid var(--fbjs-edge-arrow-focus, #4d9cff);
+  outline: 2px solid var(--fbjs-edge-arrow-focus);
   outline-offset: 2px;
 }
 
@@ -90,12 +93,3 @@
   }
 }
 
-/* Dark theme uses a lighter chip so it stays legible against dark page
-   backgrounds. */
-[data-theme='dark'] .fbjs-edge-arrow {
-  background: var(--fbjs-edge-arrow-bg, rgba(255, 255, 255, 0.18));
-  color: var(--fbjs-edge-arrow-fg, #fff);
-}
-[data-theme='dark'] .fbjs-edge-arrow:hover {
-  background: var(--fbjs-edge-arrow-bg-hover, rgba(255, 255, 255, 0.28));
-}
