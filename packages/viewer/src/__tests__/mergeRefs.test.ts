@@ -60,9 +60,9 @@ describe('mergeRefs — mixed ref-shape paths (review finding H-§1.1)', () => {
 
   it('cleanups fire in REVERSE order (most-recently-added first)', () => {
     const order: string[] = [];
-    const ref1 = vi.fn(() => () => order.push('ref1-cleanup'));
-    const ref2 = vi.fn(() => () => order.push('ref2-cleanup'));
-    const ref3 = vi.fn(() => () => order.push('ref3-cleanup'));
+    const ref1 = vi.fn(() => () => { order.push('ref1-cleanup'); });
+    const ref2 = vi.fn(() => () => { order.push('ref2-cleanup'); });
+    const ref3 = vi.fn(() => () => { order.push('ref3-cleanup'); });
     const cleanup = mergeRefs(ref1, ref2, ref3)(document.createElement('div'));
     cleanup!();
     expect(order).toEqual(['ref3-cleanup', 'ref2-cleanup', 'ref1-cleanup']);
@@ -97,9 +97,9 @@ describe('mergeRefs — exception isolation', () => {
 
   it('a throwing cleanup does NOT prevent other cleanups from running', () => {
     const order: string[] = [];
-    const ref1 = vi.fn(() => () => order.push('ref1'));
+    const ref1 = vi.fn(() => () => { order.push('ref1'); });
     const ref2 = vi.fn(() => () => { order.push('ref2-pre'); throw new Error('cleanup boom'); });
-    const ref3 = vi.fn(() => () => order.push('ref3'));
+    const ref3 = vi.fn(() => () => { order.push('ref3'); });
     const errorSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const cleanup = mergeRefs(ref1, ref2, ref3)(document.createElement('div'));
     expect(() => cleanup!()).not.toThrow();
