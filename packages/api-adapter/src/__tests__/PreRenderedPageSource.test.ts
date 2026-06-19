@@ -109,7 +109,26 @@ beforeEach(() => {
   stubCreateImageBitmap();
   drawImageMock = vi.fn();
   HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, ...args: unknown[]) {
-    const ctx = (originalGetContext as (...a: unknown[]) => unknown).apply(this, args);
+    let ctx = (originalGetContext as (...a: unknown[]) => unknown).apply(this, args);
+    // jsdom returns null for getContext (no canvas implementation); the
+    // viewer's CurlOverlay degraded-mode detection relies on that, so we
+    // can't globally polyfill it. Local to THIS test file (which exercises
+    // the api-adapter's renderPage path that requires a real-ish 2D
+    // context), substitute a minimal stub object when jsdom returns null.
+    if (ctx === null && args[0] === '2d') {
+      ctx = {
+        canvas: this,
+        drawImage: () => {},
+        clearRect: () => {},
+        fillRect: () => {},
+        save: () => {},
+        restore: () => {},
+        translate: () => {},
+        scale: () => {},
+        setTransform: () => {},
+        resetTransform: () => {},
+      };
+    }
     if (ctx && typeof ctx === 'object' && 'drawImage' in ctx) {
       (ctx as { drawImage: typeof drawImageMock }).drawImage = drawImageMock;
     }
