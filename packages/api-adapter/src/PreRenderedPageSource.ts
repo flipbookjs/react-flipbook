@@ -25,6 +25,7 @@ const INIT_TIMEOUT_MS = 30_000;
 
 export interface Manifest {
   manifestVersion: 1;
+  converterVersion?: string;
   documentId: string;
   contentHash: string;
   status: 'ready' | 'pending' | 'failed';

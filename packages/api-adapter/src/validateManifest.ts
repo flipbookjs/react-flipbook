@@ -19,6 +19,22 @@ import type { Manifest } from './PreRenderedPageSource';
 const SCHEME_RE = /^[A-Za-z][A-Za-z0-9+\-.]*:/;
 const CONTROL_CHARS_RE = /[\x00-\x1F\x7F]/;
 
+// "Semver-ish" sanity check — NOT BNF-strict semver. This intentionally accepts
+// some inputs the official semver.org grammar would reject (e.g., "01.0.0" with
+// a leading-zero numeric identifier, empty pre-release dot-segments). The check
+// exists to catch operationally-relevant typos and bundle corruption ("hello",
+// "v1.0.0", "1.0", "1.0.0.0") — NOT to enforce the full BNF grammar. If we ever
+// need BNF-strict, pull in the `semver` npm package; until then, the regex is
+// honest about being lax.
+const SEMVER_ISH_RE = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/;
+
+// 64-char cap — generous headroom over real-world semver tags. The longest
+// real-world tag the author has seen is "1.0.0-alpha+exp.sha.5114f85.build.20231231"
+// at ~42 chars; 64 leaves room for further pre-release / build-metadata growth.
+// A malicious or buggy producer could otherwise emit a multi-MB pre-release
+// suffix that matches the regex; capping bounds validator CPU + adapter-init time.
+const CONVERTER_VERSION_MAX_LEN = 64;
+
 function validateUrlSafety(value: unknown, fieldPath: string): void {
   if (typeof value !== 'string' || value.length === 0) {
     throw new Error(`Manifest validation: ${fieldPath} must be a non-empty string; got ${describe(value)}`);
@@ -431,6 +447,20 @@ export function validateManifest(raw: unknown, bundleUrl?: string): Manifest {
   validatePositiveInteger(m.pageCount, 'pageCount');
   const pageCount = m.pageCount as number;
 
+  if (m.converterVersion !== undefined) {
+    validateNonEmptyString(m.converterVersion, 'converterVersion');
+    if ((m.converterVersion as string).length > CONVERTER_VERSION_MAX_LEN) {
+      throw new Error(
+        `Manifest validation: converterVersion exceeds ${CONVERTER_VERSION_MAX_LEN}-char cap; got ${(m.converterVersion as string).length} chars`,
+      );
+    }
+    if (!SEMVER_ISH_RE.test(m.converterVersion as string)) {
+      throw new Error(
+        `Manifest validation: converterVersion must be MAJOR.MINOR.PATCH shape (semver-ish); got ${describe(m.converterVersion)}`,
+      );
+    }
+  }
+
   const defaults = validateDefaults(m.defaults, 'defaults');
 
   // SDR1 cross-constraint — pageNumberDigits sufficient for pageCount.
@@ -469,6 +499,7 @@ export function validateManifest(raw: unknown, bundleUrl?: string): Manifest {
     documentArtifacts,
   };
   if (overrides !== undefined) out.overrides = overrides;
+  if (m.converterVersion !== undefined) out.converterVersion = m.converterVersion as string;
   return out;
 }
 

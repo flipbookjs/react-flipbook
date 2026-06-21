@@ -329,4 +329,38 @@ describe('validateManifest', () => {
       }))).toThrow(/scheme-prefixed URL/);
     });
   });
+
+  describe('converterVersion (Phase F)', () => {
+    it('accepts legacy bundle without converterVersion (typed value is undefined)', () => {
+      const typed = validateManifest(makeManifest());
+      expect(typed.converterVersion).toBeUndefined();
+    });
+
+    it('validates converterVersion when present (semver-ish shape + 64-char cap)', () => {
+      // Rejected by shape — non-string / empty
+      expect(() => validateManifest(makeManifest({ converterVersion: '' }))).toThrow(/converterVersion/);
+      expect(() => validateManifest(makeManifest({ converterVersion: 42 }))).toThrow(/converterVersion/);
+
+      // Rejected by shape — does not match MAJOR.MINOR.PATCH(-pre)(+build)
+      expect(() => validateManifest(makeManifest({ converterVersion: 'hello' }))).toThrow(/MAJOR\.MINOR\.PATCH/);
+      expect(() => validateManifest(makeManifest({ converterVersion: 'v1.0.0' }))).toThrow(/MAJOR\.MINOR\.PATCH/);
+      expect(() => validateManifest(makeManifest({ converterVersion: '1.0' }))).toThrow(/MAJOR\.MINOR\.PATCH/);
+      expect(() => validateManifest(makeManifest({ converterVersion: '1.0.0.0' }))).toThrow(/MAJOR\.MINOR\.PATCH/);
+
+      // Rejected by length — over the 64-char cap (regex would match but length check kills it first)
+      const overCap = '0.2.0-' + 'a'.repeat(65);
+      expect(overCap.length).toBeGreaterThan(64);
+      expect(() => validateManifest(makeManifest({ converterVersion: overCap }))).toThrow(/64-char cap/);
+
+      // Accepted — well-formed semver-ish
+      for (const v of ['0.2.0', '1.0.0', '2.1.1', '0.2.0-alpha.1', '0.2.0+build.123']) {
+        expect(validateManifest(makeManifest({ converterVersion: v })).converterVersion).toBe(v);
+      }
+
+      // Accepted at cap boundary — exactly 64 chars, must pass
+      const atCap = '0.2.0-' + 'a'.repeat(58);
+      expect(atCap.length).toBe(64);
+      expect(validateManifest(makeManifest({ converterVersion: atCap })).converterVersion).toBe(atCap);
+    });
+  });
 });
