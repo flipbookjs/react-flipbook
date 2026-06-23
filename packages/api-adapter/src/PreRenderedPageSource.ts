@@ -8,6 +8,90 @@ import type {
   OutlineItem,
 } from '@flipbookjs/react-viewer';
 import { validateManifest } from './validateManifest';
+import { tokenizeQuery } from './tokenizeQuery';
+
+// ============================================================
+// Step 8a Phase G — search index public types
+// ============================================================
+
+/** Inner index shape per Phase D winner (inverted). */
+export type InvertedIndex = Record<string, Array<[number, number]>>;
+/**
+ * Historical sibling shape; preserved in the type surface so a future v1.x
+ * format swap doesn't require a major bump. The current adapter only reads
+ * `InvertedIndex` — see `EXPECTED_FORMAT` below.
+ */
+export type SortedPositionalIndex = Array<[string, number, number]>;
+
+/**
+ * Locked envelope shape per Step 8a Phase C. Both candidate index formats
+ * (inverted vs sorted-positional) are wrapped in this envelope so:
+ *   1. `errors[]` has a safe slot regardless of the inner format
+ *   2. `format` is the source of truth for the shape-detection guard
+ *   3. `stats` carries operational metadata for the audit trail
+ */
+export interface SearchIndexEnvelope {
+  format: 'inverted' | 'sorted';
+  serializationVersion: 1;
+  index: InvertedIndex | SortedPositionalIndex;
+  errors: Array<{
+    page_index: number;
+    code: 'extraction_timeout' | 'resource_limit_exceeded' | string;
+    message: string;
+  }>;
+  stats: {
+    token_count: number;
+    page_count: number;
+    errored_page_count: number;
+  };
+}
+
+export interface SearchOptions {
+  /** Cap-at-page-boundary semantics; default 100. */
+  maxResults?: number;
+  /**
+   * `searchTerm` is the heaviest accessor (1 search.json fetch + up to N
+   * parallel text.json fetches via Promise.all) — mirrors the existing
+   * `renderPage(index, scale, signal?)` precedent. Threaded to every fetch;
+   * on abort the promise rejects with `AbortError`.
+   */
+  signal?: AbortSignal;
+}
+
+export interface SearchHit {
+  pageIndex: number;
+  itemIndex: number;
+  matchedToken: string;
+  /**
+   * PLAIN TEXT — do NOT pass to innerHTML, dangerouslySetInnerHTML,
+   * document.write, or any HTML-interpolating sink. Use textContent /
+   * React `{child}` / equivalent.
+   *
+   * The adapter's `buildSnippet` strips HTML-active chars (`<>&'"\``) as
+   * defense in depth — even if a malicious PDF embeds `<script>` in its
+   * text layer, the snippet rendered to consumers is harmless. Consumers
+   * are still responsible for treating this field as untrusted text
+   * content. Defense in depth, not defense in sufficiency.
+   */
+  contextSnippet: string;
+}
+
+// Compile-time hardcoded — set during Phase D when the winner is chosen. The
+// adapter NEVER tries to parse both formats; the envelope's `format` field is
+// the source of truth and a mismatch fails loud.
+const EXPECTED_FORMAT: 'inverted' | 'sorted' = 'inverted';
+const EXPECTED_SERIALIZATION_VERSION = 1;
+const DEFAULT_MAX_RESULTS = 100;
+const QUERY_LENGTH_CAP = 1024;
+const LEGACY_SEARCH_HITS: SearchHit[] = [];
+
+// Snippet windowing + sanitization constants (see `buildSnippet`).
+const SNIPPET_WINDOW_BEFORE = 20;
+const SNIPPET_WINDOW_AFTER = 30;
+const SNIPPET_MAX_CHARS = 50;
+const HTML_ACTIVE_CHARS_RE = /[<>&'"`]/g;
+const TRIM_PARTIAL_WORD_LEAD = /^\S+\s/;
+const TRIM_PARTIAL_WORD_TAIL = /\s\S+$/;
 
 // Mirrors PdfjsSource.ts:114 canvas-area guard. Mobile Safari and some older
 // Android browsers have a max canvas backing-store area; exceeding it produces
@@ -309,6 +393,220 @@ export class PreRenderedPageSource implements PageSource {
     return items;
   }
 
+  // ============================================================
+  // Step 8a Phase G — searchTerm()
+  // ============================================================
+
+  /**
+   * Search the document for `query`. Multi-token queries are AND-matched
+   * (all tokens must appear on the same page; one hit per qualifying page).
+   * Single-token queries return one hit per posting (may overshoot
+   * `maxResults` at page boundaries; see plan §G "cap-at-page-boundary").
+   *
+   * Hit ordering: ascending `(pageIndex, itemIndex)`.
+   *
+   * Legacy bundles (no `search.json` artifact, 404, or `{}` placeholder)
+   * return an empty array — gracefully treated as "search not available".
+   * Envelope shape failures (wrong `format`, wrong `serializationVersion`,
+   * non-object) throw with a diagnostic message.
+   *
+   * `options.signal` is threaded to every fetch (search.json + page text);
+   * abort rejects the returned promise with `AbortError`.
+   */
+  async searchTerm(query: string, options: SearchOptions = {}): Promise<SearchHit[]> {
+    this.requireInit();
+
+    // Cheap query-side defensive checks BEFORE network access. No fetch fires
+    // for an invalid query — the cap protects the tokenizer + cache from
+    // pathological-input DoS at the adapter trust boundary.
+    if (query.length > QUERY_LENGTH_CAP) {
+      throw new Error(
+        `searchTerm: query exceeds ${QUERY_LENGTH_CAP}-char cap; truncate caller-side`,
+      );
+    }
+    // Pre-aborted signal check — mirrors renderPage's pattern at the same
+    // entry point. Native fetch would reject anyway when given an aborted
+    // signal, but checking up front gives a deterministic AbortError without
+    // racing the fetch implementation.
+    if (options.signal?.aborted) throw new DOMException('aborted', 'AbortError');
+
+    const trimmed = query.trim();
+    if (trimmed.length === 0) return [];
+
+    // Tokenize BEFORE fetch — pure CPU, cheap. If the query is all
+    // punctuation/control/whitespace, tokens is empty and we short-circuit.
+    const queryTokens = tokenizeQuery(trimmed).map((t) => t.text);
+    if (queryTokens.length === 0) return [];
+
+    // `documentArtifacts.search` is OPTIONAL. Treat absent as legacy.
+    const searchPath = this.manifest!.documentArtifacts.search;
+    if (searchPath === undefined) return LEGACY_SEARCH_HITS;
+    const url = `${this.bundleUrl}/${searchPath}`;
+    const res = await fetch(url, { credentials: this.credentials, signal: options.signal });
+    if (res.status === 404) return LEGACY_SEARCH_HITS;
+    if (!res.ok) {
+      throw new Error(
+        `Sidecar fetch failed (${res.status} ${res.statusText}) for ${url}`,
+      );
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = await res.json();
+    } catch (parseErr) {
+      throw new Error(
+        `search.json parse failed for ${url}: ${
+          parseErr instanceof Error ? parseErr.message : String(parseErr)
+        }. Bundle may be truncated, encoded incorrectly, or served with a non-JSON content type.`,
+      );
+    }
+
+    // Plain-object guard. Without this, `[]` would be `Object.keys`-empty
+    // (incorrectly treated as legacy); `null` would throw an unclear TypeError;
+    // `42` would Object()-wrap and also look empty.
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      const kind =
+        parsed === null ? 'null' : Array.isArray(parsed) ? 'array' : typeof parsed;
+      throw new Error(
+        `search.json shape invalid: expected plain object envelope, got ${kind}. Likely a malformed bundle.`,
+      );
+    }
+    if (Object.keys(parsed).length === 0) return LEGACY_SEARCH_HITS;
+
+    // Envelope shape: format + serializationVersion checks before narrowing.
+    const probed = parsed as { format?: unknown; serializationVersion?: unknown };
+    if (probed.format !== EXPECTED_FORMAT) {
+      throw new Error(
+        `search.json format mismatch: adapter expects '${EXPECTED_FORMAT}', bundle declares '${String(
+          probed.format,
+        )}'. Re-convert the bundle or upgrade the adapter.`,
+      );
+    }
+    if (probed.serializationVersion !== EXPECTED_SERIALIZATION_VERSION) {
+      throw new Error(
+        `search.json serializationVersion mismatch: adapter expects ${EXPECTED_SERIALIZATION_VERSION}, bundle declares ${String(
+          probed.serializationVersion,
+        )}.`,
+      );
+    }
+    const envelope = parsed as SearchIndexEnvelope;
+
+    // Per-page extraction errors are recoverable — the index is still valid
+    // for pages that succeeded. Warn once per instance so repeated searches
+    // don't spam the console.
+    if (envelope.errors.length > 0 && !this.warnedAboutSearchErrors) {
+      console.warn(
+        `[api-adapter] search.json reports ${envelope.errors.length} extraction error(s):`,
+        envelope.errors,
+      );
+      this.warnedAboutSearchErrors = true;
+    }
+
+    const maxResults = options.maxResults ?? DEFAULT_MAX_RESULTS;
+    const index = envelope.index as InvertedIndex; // narrowed by EXPECTED_FORMAT === 'inverted'
+
+    const rawHits: Array<Omit<SearchHit, 'contextSnippet'>> =
+      queryTokens.length === 1
+        ? findSingleToken(index, queryTokens[0], maxResults)
+        : findMultiTokenAnd(index, queryTokens, maxResults);
+
+    // Snippet enrichment IN PARALLEL via Promise.all — sequential awaits
+    // would blow the SLO budget on non-trivial hit counts. The per-instance
+    // `pageTextCache` dedups fetches when multiple hits share a page.
+    const enriched: SearchHit[] = await Promise.all(
+      rawHits.map(async (hit) => {
+        const items = await this.loadPageTextForSnippet(hit.pageIndex, options.signal);
+        return { ...hit, contextSnippet: buildSnippet(items, hit.itemIndex) };
+      }),
+    );
+    return enriched;
+  }
+
+  /**
+   * Per-page text cache for snippet enrichment. Stores the in-flight
+   * `Promise<TextItem[]>` so concurrent awaiters dedup; once resolved, the
+   * Promise's value is returned synchronously on subsequent lookups. Negative
+   * caching (failure → `[]`) prevents re-fetch of a broken sidecar.
+   */
+  private pageTextCache = new Map<number, Promise<TextItem[]>>();
+
+  /** Warn-once flag for `search.json::errors[]` surfacing. */
+  private warnedAboutSearchErrors = false;
+
+  /** Per-page set of pages we've already warned about for snippet failures. */
+  private warnedFailedSnippetPages = new Set<number>();
+
+  private loadPageTextForSnippet(pageIndex: number, signal?: AbortSignal): Promise<TextItem[]> {
+    const cached = this.pageTextCache.get(pageIndex);
+    if (cached !== undefined) return cached;
+    const promise = this.fetchPageText(pageIndex, signal);
+    this.pageTextCache.set(pageIndex, promise);
+    // If the promise rejects (only AbortError reaches here — every other
+    // failure path is swallowed in fetchPageText and returns []), evict so
+    // the next query can retry without inheriting the cached rejection.
+    promise.catch(() => this.pageTextCache.delete(pageIndex));
+    return promise;
+  }
+
+  private async fetchPageText(pageIndex: number, signal?: AbortSignal): Promise<TextItem[]> {
+    const url = this.buildSidecarUrl(pageIndex, 'text');
+    // Negative caching applies to RECOVERABLE failure paths (404, network,
+    // parse, shape). A broken sidecar should NOT take down the whole search
+    // — the snippet becomes "" for hits on that page; hit metadata
+    // (pageIndex + itemIndex + matchedToken) is still useful UX. One warn
+    // per page per failure kind, dedup'd via `warnedFailedSnippetPages`.
+    // AbortError is the EXCEPTION: the user explicitly canceled the query —
+    // propagate so the searchTerm promise rejects per the §G AbortSignal
+    // contract.
+    let res: Response;
+    try {
+      res = await fetch(url, { credentials: this.credentials, signal });
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') throw err;
+      this.warnFailedSnippet(pageIndex, 'network', err);
+      return [];
+    }
+    if (res.status === 404) {
+      this.warnFailedSnippet(pageIndex, 'missing', `HTTP 404 at ${url}`);
+      return [];
+    }
+    if (!res.ok) {
+      this.warnFailedSnippet(
+        pageIndex,
+        'http_error',
+        `HTTP ${res.status} ${res.statusText} at ${url}`,
+      );
+      return [];
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = await res.json();
+    } catch (err) {
+      this.warnFailedSnippet(pageIndex, 'parse', err);
+      return [];
+    }
+
+    if (!Array.isArray((parsed as { items?: unknown })?.items)) {
+      this.warnFailedSnippet(
+        pageIndex,
+        'shape',
+        'text.json does not contain an items array',
+      );
+      return [];
+    }
+    return (parsed as { items: TextItem[] }).items;
+  }
+
+  private warnFailedSnippet(pageIndex: number, kind: string, detail: unknown): void {
+    if (this.warnedFailedSnippetPages.has(pageIndex)) return;
+    this.warnedFailedSnippetPages.add(pageIndex);
+    console.warn(
+      `[api-adapter] snippet load failed for page ${pageIndex} (${kind}); snippets for this page will be empty. Detail:`,
+      detail,
+    );
+  }
+
   dispose(): void {
     this.disposed = true;
     this.manifest = null;
@@ -320,6 +618,12 @@ export class PreRenderedPageSource implements PageSource {
     this.activeRenders = 0;
     const disposedError = new Error('PreRenderedPageSource disposed while render was queued');
     for (const entry of queue) entry.reject(disposedError);
+
+    // 8a Phase G: clear search-index instance state. Idempotent; safe on an
+    // already-disposed instance.
+    this.pageTextCache.clear();
+    this.warnedFailedSnippetPages.clear();
+    this.warnedAboutSearchErrors = false;
   }
 
   // ---- concurrency limiter (mirrors PdfjsSource.ts:182-212) ----
@@ -398,4 +702,141 @@ export class PreRenderedPageSource implements PageSource {
   private pageId(index: number): string {
     return String(index + 1).padStart(this.manifest!.defaults.pageNumberDigits, '0');
   }
+}
+
+// ============================================================
+// Step 8a Phase G — search helpers (module-private)
+// ============================================================
+
+/**
+ * Single-token search against the inverted index. Returns one hit per posting
+ * in `(pageIndex, itemIndex)` ascending order. Cap-at-page-boundary: once
+ * `maxResults` is reached, finish the current page then stop before starting
+ * a new one. Consumer who needs a sharp cap does `.slice(0, maxResults)`.
+ */
+function findSingleToken(
+  index: InvertedIndex,
+  token: string,
+  maxResults: number,
+): Array<Omit<SearchHit, 'contextSnippet'>> {
+  const postings = index[token];
+  if (postings === undefined || postings.length === 0) return [];
+  // Defensive sort: the Rust builder emits postings in PageTokens order (which
+  // is page-then-item ascending), but a future builder change could shift this
+  // — sorting here keeps the consumer-side guarantee firm.
+  const sorted = [...postings].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+
+  const hits: Array<Omit<SearchHit, 'contextSnippet'>> = [];
+  let lastPageIndex = -1;
+  for (const [pageIndex, itemIndex] of sorted) {
+    if (hits.length >= maxResults && pageIndex !== lastPageIndex) break;
+    hits.push({ pageIndex, itemIndex, matchedToken: token });
+    lastPageIndex = pageIndex;
+  }
+  return hits;
+}
+
+/**
+ * Multi-token AND search. Returns one hit per page where ALL tokens appear.
+ * `matchedToken` is the FIRST query token (per the locked §G semantics); the
+ * `itemIndex` references that token's first occurrence on the page.
+ *
+ * `maxResults` is enforced at exact page granularity here (no overshoot)
+ * — one hit per qualifying page.
+ */
+function findMultiTokenAnd(
+  index: InvertedIndex,
+  tokens: string[],
+  maxResults: number,
+): Array<Omit<SearchHit, 'contextSnippet'>> {
+  const firstToken = tokens[0];
+
+  // Per-token: set of pageIndices the token appears on.
+  const perTokenPageSets = tokens.map((t) => {
+    const set = new Set<number>();
+    const postings = index[t];
+    if (postings !== undefined) {
+      for (const [pageIndex] of postings) set.add(pageIndex);
+    }
+    return set;
+  });
+
+  // Empty intersection short-circuit: if any token never appears, no hits.
+  if (perTokenPageSets.some((s) => s.size === 0)) return [];
+
+  // Intersect from the smallest set outward (cheaper).
+  const orderedBySize = [...perTokenPageSets].sort((a, b) => a.size - b.size);
+  let intersection = new Set<number>(orderedBySize[0]);
+  for (let i = 1; i < orderedBySize.length; i++) {
+    const next = new Set<number>();
+    for (const p of intersection) if (orderedBySize[i].has(p)) next.add(p);
+    intersection = next;
+    if (intersection.size === 0) return [];
+  }
+
+  // First-occurrence itemIndex of FIRST token on each qualifying page.
+  const firstTokenPostings = index[firstToken] ?? [];
+  const pageToFirstItem = new Map<number, number>();
+  for (const [pageIndex, itemIndex] of firstTokenPostings) {
+    if (intersection.has(pageIndex) && !pageToFirstItem.has(pageIndex)) {
+      pageToFirstItem.set(pageIndex, itemIndex);
+    }
+  }
+
+  const sortedPages = [...pageToFirstItem.keys()].sort((a, b) => a - b);
+  return sortedPages.slice(0, maxResults).map((p) => ({
+    pageIndex: p,
+    itemIndex: pageToFirstItem.get(p)!,
+    matchedToken: firstToken,
+  }));
+}
+
+/**
+ * Build a ~50-char contextSnippet around the matching item. Window the items
+ * `[itemIndex - SNIPPET_WINDOW_BEFORE, itemIndex + SNIPPET_WINDOW_AFTER)`,
+ * concatenate `.text`, trim to `SNIPPET_MAX_CHARS` centered on the hit, snap
+ * to word boundaries (FlexSearch-style — mid-word cuts look broken), sanitize
+ * per §3.9 (NFC + null-strip) AND strip HTML-active chars for XSS
+ * defense-in-depth. Ellipses denote trimmed edges.
+ */
+export function buildSnippet(items: TextItem[], itemIndex: number): string {
+  if (items.length === 0) return '';
+
+  const startIdx = Math.max(0, itemIndex - SNIPPET_WINDOW_BEFORE);
+  const endIdx = Math.min(items.length, itemIndex + SNIPPET_WINDOW_AFTER);
+  let raw = items
+    .slice(startIdx, endIdx)
+    .map((i) => i.text)
+    .join('');
+
+  let trimmedFront = startIdx > 0;
+  let trimmedBack = endIdx < items.length;
+
+  if (raw.length > SNIPPET_MAX_CHARS) {
+    const center = itemIndex - startIdx;
+    const sliceStart = Math.max(0, center - Math.floor(SNIPPET_MAX_CHARS / 2));
+    raw = raw.slice(sliceStart, sliceStart + SNIPPET_MAX_CHARS);
+    if (sliceStart > 0) trimmedFront = true;
+    trimmedBack = true;
+  }
+
+  // Snap to word boundaries — drop a partial word at the leading edge and
+  // trailing edge if we trimmed there. Mid-word cuts read as broken text.
+  if (trimmedFront && TRIM_PARTIAL_WORD_LEAD.test(raw)) {
+    raw = raw.replace(TRIM_PARTIAL_WORD_LEAD, '');
+  }
+  if (trimmedBack && TRIM_PARTIAL_WORD_TAIL.test(raw)) {
+    raw = raw.replace(TRIM_PARTIAL_WORD_TAIL, '');
+  }
+
+  // §3.9 sanitization: null-strip + NFC normalize.
+  raw = raw.replace(/\0/g, '').normalize('NFC');
+
+  // XSS defense-in-depth: strip (not escape) HTML-active chars. The snippet
+  // contract is PLAIN TEXT (see SearchHit.contextSnippet doc). Strip-not-escape
+  // because the field is shown as text — escaping would render literal `&lt;`
+  // which is worse UX for a snippet of book content.
+  raw = raw.replace(HTML_ACTIVE_CHARS_RE, '');
+
+  return (trimmedFront ? '…' : '') + raw + (trimmedBack ? '…' : '');
 }
