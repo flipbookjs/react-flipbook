@@ -9,4 +9,10 @@ export type {
   SearchIndexEnvelope,
   InvertedIndex,
   SortedPositionalIndex,
+  // 8b additions — additive on the public surface (1.3.0 minor bump).
+  ReadingOrder,
+  ReadingOrderBlock,
+  ReadingOrderBlockKind,
+  ReadingOrderSource,
+  ReadingOrderOptions,
 } from './PreRenderedPageSource';

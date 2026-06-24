@@ -93,6 +93,87 @@ const HTML_ACTIVE_CHARS_RE = /[<>&'"`]/g;
 const TRIM_PARTIAL_WORD_LEAD = /^\S+\s/;
 const TRIM_PARTIAL_WORD_TAIL = /\s\S+$/;
 
+// ============================================================
+// Step 8b Phase B — reading-order types, consts, and options.
+// Per step-8b-reading-order.md §5. Mirrors 8a's typed-envelope
+// pattern (EXPECTED_* version constant, LEGACY_* graceful-
+// degradation default, exported options interface).
+// ============================================================
+
+/**
+ * Known block kinds. OPEN UNION: future v1.x sidecars may include additional
+ * kind values without bumping `serializationVersion`. Consumer code MUST
+ * handle unknown kinds gracefully — render with paragraph semantics by default.
+ * The `string & {}` intersection preserves autocomplete on the known values
+ * while accepting any string at runtime.
+ */
+export type ReadingOrderBlockKind =
+  | 'paragraph'
+  | 'heading'
+  | 'caption'
+  | 'aside'
+  | (string & {});
+
+export type ReadingOrderSource = 'passthrough' | 'structtree' | 'heuristic';
+
+export interface ReadingOrderBlock {
+  kind: ReadingOrderBlockKind;
+  /**
+   * Compact contiguous-range form: `[startInclusive, endExclusive]`. Used by
+   * v1 passthrough (always) and future StructTree/heuristic blocks whose
+   * referenced items happen to be contiguous (the common case). Mutually
+   * exclusive with `items`.
+   */
+  itemRange?: [number, number];
+  /**
+   * Sparse form for blocks whose items are non-contiguous. Future StructTree
+   * walker uses this for marked-content sequences that interleave with other
+   * content. Mutually exclusive with `itemRange`. v1 passthrough NEVER emits.
+   */
+  items?: number[];
+  rect: [number, number, number, number];
+}
+
+export interface ReadingOrder {
+  serializationVersion: 1;
+  source: ReadingOrderSource;
+  blocks: ReadingOrderBlock[];
+  order: number[];
+  errors: Array<{ code: string; message: string }>;
+}
+
+const LEGACY_READING_ORDER: ReadingOrder = {
+  serializationVersion: 1,
+  source: 'passthrough',
+  blocks: [],
+  order: [],
+  errors: [],
+};
+
+const EXPECTED_READING_ORDER_SERIALIZATION_VERSION = 1;
+// Coexistence note: 8a defined `EXPECTED_SERIALIZATION_VERSION = 1`
+// (PreRenderedPageSource.ts:83), which is search-specific by context but
+// generically named. 8b deliberately introduces the fully-qualified
+// `EXPECTED_READING_ORDER_SERIALIZATION_VERSION` rather than reusing or
+// renaming the 8a constant — they version independently (each envelope
+// bumps its own `serializationVersion` on shape change). Future passes
+// (8b.1 StructTree, 8b.2 heuristic, 8c accessibility-report) follow this
+// `EXPECTED_<SLICE>_SERIALIZATION_VERSION` naming. Per Rule 5 we do NOT
+// rename the 8a constant for harmony — that's "while we're at it" cleanup.
+
+// Named options interface — mirrors 8a's `SearchOptions` (PreRenderedPageSource.ts:49)
+// so consumers can `import type { ReadingOrderOptions }` and pre-declare typed
+// option objects. v1 only has `signal`; future additive options (e.g., a
+// `blockKindsFilter` for screen-reader UX) land here without breaking the
+// signature.
+export interface ReadingOrderOptions {
+  /**
+   * Threaded to the underlying fetch; on abort the promise rejects with
+   * `AbortError`. Mirrors the established `searchTerm({ signal })` precedent.
+   */
+  signal?: AbortSignal;
+}
+
 // Mirrors PdfjsSource.ts:114 canvas-area guard. Mobile Safari and some older
 // Android browsers have a max canvas backing-store area; exceeding it produces
 // blank or downscaled output silently.
@@ -391,6 +472,159 @@ export class PreRenderedPageSource implements PageSource {
     }
     const { items } = (await res.json()) as { items: OutlineItem[] };
     return items;
+  }
+
+  // ============================================================
+  // Step 8b Phase B — getReadingOrder()
+  // ============================================================
+
+  /**
+   * Read the reading-order sidecar for `pageIndex`. v1 producer emits
+   * `source: "passthrough"` with one paragraph block per page containing
+   * all text.json items in PDFium's natural extraction order; consumer
+   * code MUST treat that as a structural placeholder, NOT as a "real"
+   * reading-order claim. The `source` field is the load-bearing honesty
+   * signal — future producers (StructTree walker, heuristic port) will
+   * upgrade some pages to `"structtree"` / `"heuristic"`, and consumer
+   * UX can detect that via `source` and adapt.
+   *
+   * Legacy bundles (404 or `{}` placeholder) return `LEGACY_READING_ORDER`
+   * — empty arrays with the same envelope shape so consumer code doesn't
+   * need to branch on existence.
+   *
+   * Shape failures (wrong `serializationVersion`, unknown `source`,
+   * malformed block selector, out-of-range `order` index, non-finite
+   * rect, etc.) throw with a diagnostic message naming the URL and the
+   * offending field. The error pattern mirrors 8a's `searchTerm`.
+   *
+   * `options.signal` is threaded to the fetch; pre-aborted or mid-flight
+   * abort rejects the promise with `AbortError`.
+   *
+   * No bounds check on `pageIndex` — follows the existing sidecar-accessor
+   * precedent (`getTextContent`, `getLinks`, `getOutline`). Out-of-range
+   * resolves to a 404 → `LEGACY_READING_ORDER`.
+   */
+  async getReadingOrder(
+    pageIndex: number,
+    options: ReadingOrderOptions = {},
+  ): Promise<ReadingOrder> {
+    this.requireInit();
+    if (options.signal?.aborted) throw new DOMException('aborted', 'AbortError');
+
+    const url = this.buildSidecarUrl(pageIndex, 'reading-order');
+    const res = await fetch(url, { credentials: this.credentials, signal: options.signal });
+    if (res.status === 404) return LEGACY_READING_ORDER;
+    if (!res.ok) {
+      throw new Error(`Sidecar fetch failed (${res.status} ${res.statusText}) for ${url}`);
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = await res.json();
+    } catch (e) {
+      throw new Error(
+        `reading-order.json parse failed for ${url}: ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      );
+    }
+
+    // Structural envelope validation BEFORE narrowing — mirrors 8a's
+    // searchTerm pattern. Each field has a guard so malformed non-legacy
+    // bodies fail loudly instead of casting through.
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new Error(`reading-order.json shape invalid for ${url}: not a plain object`);
+    }
+    if (Object.keys(parsed).length === 0) return LEGACY_READING_ORDER;
+    const probed = parsed as Record<string, unknown>;
+    if (probed.serializationVersion !== EXPECTED_READING_ORDER_SERIALIZATION_VERSION) {
+      throw new Error(
+        `reading-order.json serializationVersion mismatch for ${url}: adapter expects ${EXPECTED_READING_ORDER_SERIALIZATION_VERSION}, bundle declares ${String(probed.serializationVersion)}`,
+      );
+    }
+    if (
+      probed.source !== 'passthrough' &&
+      probed.source !== 'structtree' &&
+      probed.source !== 'heuristic'
+    ) {
+      // `source` is a CLOSED discriminator at the current `serializationVersion`.
+      // A future producer that wants to introduce a fourth value MUST bump
+      // `serializationVersion` (the closed-discriminator change is, by definition,
+      // not consumer-additive — it changes which guarantees apply). Adapter
+      // rejects unknown values to surface that drift loudly at parse time.
+      throw new Error(
+        `reading-order.json invalid for ${url}: 'source' must be 'passthrough' | 'structtree' | 'heuristic'; got ${JSON.stringify(probed.source)}`,
+      );
+    }
+    if (!Array.isArray(probed.blocks)) {
+      throw new Error(`reading-order.json invalid for ${url}: 'blocks' must be an array`);
+    }
+    if (!Array.isArray(probed.order)) {
+      throw new Error(`reading-order.json invalid for ${url}: 'order' must be an array`);
+    }
+    if (!Array.isArray(probed.errors)) {
+      throw new Error(`reading-order.json invalid for ${url}: 'errors' must be an array`);
+    }
+
+    // Per-element shape checks. Cheap; fails loudly on malformed bodies.
+    for (let i = 0; i < probed.blocks.length; i++) {
+      const b = probed.blocks[i];
+      if (typeof b !== 'object' || b === null || Array.isArray(b)) {
+        throw new Error(`reading-order.json invalid for ${url}: blocks[${i}] is not an object`);
+      }
+      const bo = b as Record<string, unknown>;
+      if (typeof bo.kind !== 'string') {
+        throw new Error(`reading-order.json invalid for ${url}: blocks[${i}].kind must be a string`);
+      }
+      if (!isRectTuple(bo.rect)) {
+        throw new Error(`reading-order.json invalid for ${url}: blocks[${i}].rect must be [x1, y1, x2, y2]`);
+      }
+      const hasRange = bo.itemRange !== undefined;
+      const hasItems = bo.items !== undefined;
+      if (hasRange && hasItems) {
+        throw new Error(`reading-order.json invalid for ${url}: blocks[${i}] has both itemRange and items; mutually exclusive`);
+      }
+      if (!hasRange && !hasItems) {
+        throw new Error(`reading-order.json invalid for ${url}: blocks[${i}] has neither itemRange nor items; exactly one required (use items: [] for empty textless blocks)`);
+      }
+      if (hasRange) {
+        const r = bo.itemRange;
+        if (
+          !Array.isArray(r) ||
+          r.length !== 2 ||
+          !Number.isInteger(r[0]) ||
+          !Number.isInteger(r[1]) ||
+          (r[0] as number) < 0 ||
+          (r[1] as number) < (r[0] as number)
+        ) {
+          throw new Error(`reading-order.json invalid for ${url}: blocks[${i}].itemRange must be [start, endExclusive] of non-negative integers with start <= endExclusive`);
+        }
+      } else {
+        // hasItems
+        const arr = bo.items;
+        if (!Array.isArray(arr) || arr.some((n) => !Number.isInteger(n) || (n as number) < 0)) {
+          throw new Error(`reading-order.json invalid for ${url}: blocks[${i}].items must be an array of non-negative integers (use [] for empty textless blocks)`);
+        }
+      }
+    }
+    for (let i = 0; i < probed.order.length; i++) {
+      const n = probed.order[i];
+      if (!Number.isInteger(n) || (n as number) < 0 || (n as number) >= probed.blocks.length) {
+        throw new Error(`reading-order.json invalid for ${url}: order[${i}] must be a non-negative integer < blocks.length`);
+      }
+    }
+    for (let i = 0; i < probed.errors.length; i++) {
+      const e = probed.errors[i];
+      if (
+        typeof e !== 'object' ||
+        e === null ||
+        typeof (e as Record<string, unknown>).code !== 'string' ||
+        typeof (e as Record<string, unknown>).message !== 'string'
+      ) {
+        throw new Error(`reading-order.json invalid for ${url}: errors[${i}] must have string 'code' and 'message'`);
+      }
+    }
+    return parsed as ReadingOrder;
   }
 
   // ============================================================
@@ -702,6 +936,24 @@ export class PreRenderedPageSource implements PageSource {
   private pageId(index: number): string {
     return String(index + 1).padStart(this.manifest!.defaults.pageNumberDigits, '0');
   }
+}
+
+// ============================================================
+// Step 8b Phase B — reading-order helpers (module-private)
+// ============================================================
+
+/**
+ * Type predicate for a 4-tuple of finite numbers. Rejects non-arrays, wrong
+ * length, NaN, and ±Infinity. Reading-order rect coords are CSS-pixel
+ * canonical-box floats per producer-side `[f32; 4]`; we accept the JS
+ * `number` (f64) widening and only require finiteness.
+ */
+function isRectTuple(v: unknown): v is [number, number, number, number] {
+  return (
+    Array.isArray(v) &&
+    v.length === 4 &&
+    v.every((n) => typeof n === 'number' && Number.isFinite(n))
+  );
 }
 
 // ============================================================
