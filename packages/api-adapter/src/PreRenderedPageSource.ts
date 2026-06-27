@@ -174,6 +174,164 @@ export interface ReadingOrderOptions {
   signal?: AbortSignal;
 }
 
+// ============================================================
+// Step 8c Phase B — accessibility types (§5.1) + LEGACY constants
+// (§5.2) + EXPECTED_* version pins. Reading-order coexistence: each
+// envelope versions independently per the
+// `EXPECTED_<SLICE>_SERIALIZATION_VERSION` naming established by 8b.
+// ============================================================
+
+/**
+ * Provenance of an extracted accessibility item. OPEN UNION — known values
+ * are `structtree | heuristic | manual`; future producers MAY emit additional
+ * values (e.g., `mcid-derived` from 8c.1, `ai-suggested` from a future LLM
+ * pipeline) without bumping `serializationVersion`. Adapter validator
+ * accepts any non-empty string. Consumer UIs SHOULD treat unknown values as
+ * "unspecified provenance" rather than throwing. Diverges from 8b's CLOSED
+ * `ReadingOrderSource` enum because 8c's `source` is INFORMATIONAL (Step 16
+ * UI label), not SEMANTIC (consumer decision-making).
+ */
+export type AccessibilitySource =
+  | 'structtree'
+  | 'heuristic'
+  | 'manual'
+  | (string & {});
+
+export type RemediationStatus = 'needsReview' | 'verified' | 'modified';
+
+export interface AccessibilityRegion {
+  id: string;
+  /** Layout-region kind. OPEN UNION — v1 producer never emits this surface
+   *  (regions[] is always `[]`), but 8c.1's heuristic emission and Step 16's
+   *  manual overlays may surface entries through the same validator. */
+  kind: 'header' | 'main' | 'footer' | 'sidebar' | (string & {});
+  rect: [number, number, number, number];
+  source: AccessibilitySource;
+  /** SHA-1 hex prefix (16 lowercase hex chars) per producer §3.2 migration-key
+   *  contract. Adapter validates structural shape only — does NOT recompute
+   *  the hash. */
+  fingerprint: string;
+}
+
+export interface AccessibilityHeading {
+  id: string;
+  level: 1 | 2 | 3 | 4 | 5 | 6;
+  /** /ActualText if present, else "" (Step 16 spatial-joins against text.json
+   *  to fill empties per producer §1 honesty discipline). */
+  text: string;
+  rect: [number, number, number, number];
+  source: AccessibilitySource;
+  fingerprint: string;
+}
+
+export interface AccessibilityAltText {
+  id: string;
+  imageRect: [number, number, number, number];
+  text: string;
+  source: AccessibilitySource;
+  fingerprint: string;
+}
+
+/**
+ * Operator-observability counters surfaced on the doc-level report. Wire
+ * keys are deliberately snake_case (per producer §2.2 lock) — they match
+ * the metric-system + tracing-event naming. The OUTER report envelope
+ * stays camelCase; only these counter sub-objects diverge.
+ */
+export interface ExtractorDiagnostics {
+  headings: {
+    seen: number;
+    skipped_missing_bbox: number;
+    emitted: number;
+    emitted_with_text: number;
+  };
+  figures: {
+    seen: number;
+    skipped_missing_bbox: number;
+    skipped_missing_alt: number;
+    emitted_with_alt: number;
+  };
+  images: {
+    enumerated: number;
+    matched_to_figure: number;
+    unmatched: number;
+  };
+}
+
+export interface PageAccessibility {
+  serializationVersion: 1;
+  pageLabel: string | null;
+  lang: string | null;
+  remediationStatus: RemediationStatus;
+  regions: AccessibilityRegion[];
+  headings: AccessibilityHeading[];
+  altText: AccessibilityAltText[];
+  errors: Array<{ feature: string; code: string; message: string }>;
+}
+
+export interface AccessibilityReport {
+  serializationVersion: 1;
+  /** `bool` from producer (`FPDFCatalog_IsTagged`); `null` only in
+   *  `LEGACY_ACCESSIBILITY_REPORT` (legacy `{}`-placeholder bundles where
+   *  the producer never measured). */
+  tagged: boolean | null;
+  lang: string | null;
+  structure: { score: number | null; source: AccessibilitySource | null };
+  headings: {
+    score: number | null;
+    source: AccessibilitySource | null;
+    extracted: number;
+    missing: number | null;
+  };
+  altText: {
+    score: number | null;
+    source: AccessibilitySource | null;
+    extracted: number;
+    missing: number;
+    imageCount: number;
+  };
+  readingOrder: {
+    score: number | null;
+    source: 'passthrough' | 'structtree' | 'heuristic';
+  };
+  errors: Array<{ feature: string; code: string; message: string }>;
+  extractorDiagnostics: ExtractorDiagnostics;
+}
+
+export interface AccessibilityOptions {
+  signal?: AbortSignal;
+}
+
+const LEGACY_PAGE_ACCESSIBILITY: PageAccessibility = {
+  serializationVersion: 1,
+  pageLabel: null,
+  lang: null,
+  remediationStatus: 'needsReview',
+  regions: [],
+  headings: [],
+  altText: [],
+  errors: [],
+};
+
+const LEGACY_ACCESSIBILITY_REPORT: AccessibilityReport = {
+  serializationVersion: 1,
+  tagged: null,
+  lang: null,
+  structure: { score: null, source: null },
+  headings: { score: null, source: null, extracted: 0, missing: null },
+  altText: { score: null, source: null, extracted: 0, missing: 0, imageCount: 0 },
+  readingOrder: { score: null, source: 'passthrough' },
+  errors: [],
+  extractorDiagnostics: {
+    headings: { seen: 0, skipped_missing_bbox: 0, emitted: 0, emitted_with_text: 0 },
+    figures: { seen: 0, skipped_missing_bbox: 0, skipped_missing_alt: 0, emitted_with_alt: 0 },
+    images: { enumerated: 0, matched_to_figure: 0, unmatched: 0 },
+  },
+};
+
+const EXPECTED_PAGE_ACCESSIBILITY_SERIALIZATION_VERSION = 1;
+const EXPECTED_ACCESSIBILITY_REPORT_SERIALIZATION_VERSION = 1;
+
 // Mirrors PdfjsSource.ts:114 canvas-area guard. Mobile Safari and some older
 // Android browsers have a max canvas backing-store area; exceeding it produces
 // blank or downscaled output silently.
@@ -628,6 +786,176 @@ export class PreRenderedPageSource implements PageSource {
   }
 
   // ============================================================
+  // Step 8c Phase B — getAccessibility() + getAccessibilityReport()
+  // ============================================================
+
+  /**
+   * Fetch the per-page accessibility sidecar. Envelope-validating; on
+   * legacy bundles (404 or `{}` placeholder) returns
+   * `LEGACY_PAGE_ACCESSIBILITY` (empty regions / headings / altText / errors)
+   * so callers don't need a try/catch around the legacy case.
+   *
+   * Throws on:
+   * - non-404 HTTP failure
+   * - JSON parse failure
+   * - non-object body, non-empty body with wrong serializationVersion
+   * - malformed `regions[]` / `headings[]` / `altText[]` / `errors[]` items
+   * - `pageLabel` / `lang` not string-or-null
+   * - `remediationStatus` not in `'needsReview' | 'verified' | 'modified'`
+   * - missing or non-conforming `fingerprint` on any emitted item (16
+   *   lowercase hex chars per producer §3.2 migration-key contract)
+   *
+   * `options.signal` is threaded to the underlying fetch; on abort the
+   * promise rejects with `AbortError`.
+   */
+  async getAccessibility(
+    pageIndex: number,
+    options: AccessibilityOptions = {},
+  ): Promise<PageAccessibility> {
+    this.requireInit();
+    if (options.signal?.aborted) throw new DOMException('aborted', 'AbortError');
+
+    const url = this.buildSidecarUrl(pageIndex, 'accessibility');
+    const res = await fetch(url, { credentials: this.credentials, signal: options.signal });
+    if (res.status === 404) return LEGACY_PAGE_ACCESSIBILITY;
+    if (!res.ok) {
+      throw new Error(`Sidecar fetch failed (${res.status} ${res.statusText}) for ${url}`);
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = await res.json();
+    } catch (e) {
+      throw new Error(
+        `accessibility.json parse failed for ${url}: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new Error(`accessibility.json shape invalid for ${url}: not a plain object`);
+    }
+    if (Object.keys(parsed).length === 0) return LEGACY_PAGE_ACCESSIBILITY;
+
+    const probed = parsed as Record<string, unknown>;
+    if (probed.serializationVersion !== EXPECTED_PAGE_ACCESSIBILITY_SERIALIZATION_VERSION) {
+      throw new Error(
+        `accessibility.json serializationVersion mismatch for ${url}: adapter expects ${EXPECTED_PAGE_ACCESSIBILITY_SERIALIZATION_VERSION}, bundle declares ${String(probed.serializationVersion)}`,
+      );
+    }
+
+    if (probed.pageLabel !== null && typeof probed.pageLabel !== 'string') {
+      throw new Error(`accessibility.json invalid for ${url}: pageLabel must be string or null`);
+    }
+    if (probed.lang !== null && typeof probed.lang !== 'string') {
+      throw new Error(`accessibility.json invalid for ${url}: lang must be string or null`);
+    }
+
+    if (
+      probed.remediationStatus !== 'needsReview' &&
+      probed.remediationStatus !== 'verified' &&
+      probed.remediationStatus !== 'modified'
+    ) {
+      throw new Error(
+        `accessibility.json invalid for ${url}: remediationStatus must be 'needsReview' | 'verified' | 'modified'; got ${JSON.stringify(probed.remediationStatus)}`,
+      );
+    }
+
+    if (!Array.isArray(probed.regions)) {
+      throw new Error(`accessibility.json invalid for ${url}: 'regions' must be an array`);
+    }
+    if (!Array.isArray(probed.headings)) {
+      throw new Error(`accessibility.json invalid for ${url}: 'headings' must be an array`);
+    }
+    if (!Array.isArray(probed.altText)) {
+      throw new Error(`accessibility.json invalid for ${url}: 'altText' must be an array`);
+    }
+    if (!Array.isArray(probed.errors)) {
+      throw new Error(`accessibility.json invalid for ${url}: 'errors' must be an array`);
+    }
+
+    probed.regions.forEach((r, i) => validateAccessibilityRegion(r, i, url));
+    probed.headings.forEach((h, i) => validateAccessibilityHeading(h, i, url));
+    probed.altText.forEach((a, i) => validateAccessibilityAltText(a, i, url));
+    probed.errors.forEach((e, i) => validateAccessibilityErrorRecord(e, i, url));
+
+    return parsed as PageAccessibility;
+  }
+
+  /**
+   * Fetch the doc-level `accessibility-report.json`. Envelope-validating;
+   * on legacy bundles (manifest field absent, 404, or `{}` placeholder)
+   * returns `LEGACY_ACCESSIBILITY_REPORT` with `tagged: null` (the "we
+   * didn't measure" sentinel).
+   *
+   * `options.signal` is threaded to the underlying fetch; on abort the
+   * promise rejects with `AbortError`.
+   */
+  async getAccessibilityReport(
+    options: AccessibilityOptions = {},
+  ): Promise<AccessibilityReport> {
+    this.requireInit();
+    if (options.signal?.aborted) throw new DOMException('aborted', 'AbortError');
+
+    const path = this.manifest!.documentArtifacts.accessibilityReport;
+    if (path === undefined) return LEGACY_ACCESSIBILITY_REPORT;
+    const url = `${this.bundleUrl}/${path}`;
+    const res = await fetch(url, { credentials: this.credentials, signal: options.signal });
+    if (res.status === 404) return LEGACY_ACCESSIBILITY_REPORT;
+    if (!res.ok) {
+      throw new Error(`Sidecar fetch failed (${res.status} ${res.statusText}) for ${url}`);
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = await res.json();
+    } catch (e) {
+      throw new Error(
+        `accessibility-report.json parse failed for ${url}: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new Error(
+        `accessibility-report.json shape invalid for ${url}: not a plain object`,
+      );
+    }
+    if (Object.keys(parsed).length === 0) return LEGACY_ACCESSIBILITY_REPORT;
+
+    const probed = parsed as Record<string, unknown>;
+    if (probed.serializationVersion !== EXPECTED_ACCESSIBILITY_REPORT_SERIALIZATION_VERSION) {
+      throw new Error(
+        `accessibility-report.json serializationVersion mismatch for ${url}: adapter expects ${EXPECTED_ACCESSIBILITY_REPORT_SERIALIZATION_VERSION}, bundle declares ${String(probed.serializationVersion)}`,
+      );
+    }
+
+    if (probed.tagged !== null && typeof probed.tagged !== 'boolean') {
+      throw new Error(
+        `accessibility-report.json invalid for ${url}: tagged must be boolean or null; got ${JSON.stringify(probed.tagged)}`,
+      );
+    }
+    if (probed.lang !== null && typeof probed.lang !== 'string') {
+      throw new Error(
+        `accessibility-report.json invalid for ${url}: lang must be string or null; got ${JSON.stringify(probed.lang)}`,
+      );
+    }
+
+    validateReportScoreSection(probed.structure, 'structure', url);
+    validateReportHeadingsSection(probed.headings, url);
+    validateReportAltTextSection(probed.altText, url);
+    validateReportReadingOrderSection(probed.readingOrder, url);
+
+    if (!Array.isArray(probed.errors)) {
+      throw new Error(
+        `accessibility-report.json invalid for ${url}: 'errors' must be an array`,
+      );
+    }
+    probed.errors.forEach((e, i) => validateAccessibilityErrorRecord(e, i, url));
+
+    validateExtractorDiagnostics(probed.extractorDiagnostics, url);
+
+    return parsed as AccessibilityReport;
+  }
+
+  // ============================================================
   // Step 8a Phase G — searchTerm()
   // ============================================================
 
@@ -954,6 +1282,236 @@ function isRectTuple(v: unknown): v is [number, number, number, number] {
     v.length === 4 &&
     v.every((n) => typeof n === 'number' && Number.isFinite(n))
   );
+}
+
+// ============================================================
+// Step 8c Phase B — accessibility helpers (module-private)
+// ============================================================
+
+/**
+ * `AccessibilitySource` is an OPEN union (§5.1 schema decision). Adapter
+ * accepts ANY non-empty string. Known values get TypeScript autocomplete
+ * via the `'structtree' | 'heuristic' | 'manual' | (string & {})`
+ * declaration; unknown values are surfaced as-is for consumer UIs to
+ * display as "unspecified provenance."
+ */
+function isAccessibilitySource(v: unknown): v is AccessibilitySource {
+  return typeof v === 'string' && v.length > 0;
+}
+
+/**
+ * Fingerprint shape: SHA-1 hex prefix, 16 lowercase hex chars (64 bits of
+ * entropy). Adapter validates structural shape only — does NOT recompute
+ * the hash (which requires the producer's canonical key formula and is
+ * out-of-scope for adapter parse).
+ */
+const FINGERPRINT_RE = /^[0-9a-f]{16}$/;
+function isFingerprint(v: unknown): v is string {
+  return typeof v === 'string' && FINGERPRINT_RE.test(v);
+}
+
+// v1 producer emits `regions: []` always (§1 honesty discipline), so this
+// validator runs against zero items in v1. Required regardless: 8c.1's
+// heuristic emission and Step 16's manual region overlays both surface
+// entries through the same validator.
+function validateAccessibilityRegion(r: unknown, i: number, url: string): void {
+  if (typeof r !== 'object' || r === null || Array.isArray(r)) {
+    throw new Error(`accessibility.json invalid for ${url}: regions[${i}] is not an object`);
+  }
+  const ro = r as Record<string, unknown>;
+  if (typeof ro.id !== 'string' || ro.id.length === 0) {
+    throw new Error(`accessibility.json invalid for ${url}: regions[${i}].id must be a non-empty string`);
+  }
+  if (typeof ro.kind !== 'string') {
+    throw new Error(`accessibility.json invalid for ${url}: regions[${i}].kind must be a string`);
+  }
+  if (!isRectTuple(ro.rect)) {
+    throw new Error(`accessibility.json invalid for ${url}: regions[${i}].rect must be [x1, y1, x2, y2]`);
+  }
+  if (!isAccessibilitySource(ro.source)) {
+    throw new Error(`accessibility.json invalid for ${url}: regions[${i}].source must be a non-empty string`);
+  }
+  if (!isFingerprint(ro.fingerprint)) {
+    throw new Error(`accessibility.json invalid for ${url}: regions[${i}].fingerprint must be 16 lowercase hex chars`);
+  }
+}
+
+function validateAccessibilityHeading(h: unknown, i: number, url: string): void {
+  if (typeof h !== 'object' || h === null || Array.isArray(h)) {
+    throw new Error(`accessibility.json invalid for ${url}: headings[${i}] is not an object`);
+  }
+  const ho = h as Record<string, unknown>;
+  if (typeof ho.id !== 'string' || ho.id.length === 0) {
+    throw new Error(`accessibility.json invalid for ${url}: headings[${i}].id must be a non-empty string`);
+  }
+  if (!Number.isInteger(ho.level) || (ho.level as number) < 1 || (ho.level as number) > 6) {
+    throw new Error(`accessibility.json invalid for ${url}: headings[${i}].level must be an integer 1-6, got ${JSON.stringify(ho.level)}`);
+  }
+  if (typeof ho.text !== 'string') {
+    throw new Error(`accessibility.json invalid for ${url}: headings[${i}].text must be a string (may be empty if /ActualText absent per §1)`);
+  }
+  if (!isRectTuple(ho.rect)) {
+    throw new Error(`accessibility.json invalid for ${url}: headings[${i}].rect must be [x1, y1, x2, y2] of finite numbers`);
+  }
+  if (!isAccessibilitySource(ho.source)) {
+    throw new Error(`accessibility.json invalid for ${url}: headings[${i}].source must be a non-empty string`);
+  }
+  if (!isFingerprint(ho.fingerprint)) {
+    throw new Error(`accessibility.json invalid for ${url}: headings[${i}].fingerprint must be 16 lowercase hex chars`);
+  }
+}
+
+function validateAccessibilityAltText(a: unknown, i: number, url: string): void {
+  if (typeof a !== 'object' || a === null || Array.isArray(a)) {
+    throw new Error(`accessibility.json invalid for ${url}: altText[${i}] is not an object`);
+  }
+  const ao = a as Record<string, unknown>;
+  if (typeof ao.id !== 'string' || ao.id.length === 0) {
+    throw new Error(`accessibility.json invalid for ${url}: altText[${i}].id must be a non-empty string`);
+  }
+  if (!isRectTuple(ao.imageRect)) {
+    throw new Error(`accessibility.json invalid for ${url}: altText[${i}].imageRect must be [x1, y1, x2, y2] of finite numbers`);
+  }
+  if (typeof ao.text !== 'string') {
+    throw new Error(`accessibility.json invalid for ${url}: altText[${i}].text must be a string (may be empty for images with no /Alt per §1)`);
+  }
+  if (!isAccessibilitySource(ao.source)) {
+    throw new Error(`accessibility.json invalid for ${url}: altText[${i}].source must be a non-empty string`);
+  }
+  if (!isFingerprint(ao.fingerprint)) {
+    throw new Error(`accessibility.json invalid for ${url}: altText[${i}].fingerprint must be 16 lowercase hex chars`);
+  }
+}
+
+function validateAccessibilityErrorRecord(e: unknown, i: number, url: string): void {
+  if (typeof e !== 'object' || e === null || Array.isArray(e)) {
+    throw new Error(`accessibility.json invalid for ${url}: errors[${i}] is not an object`);
+  }
+  const eo = e as Record<string, unknown>;
+  if (typeof eo.feature !== 'string') {
+    throw new Error(`accessibility.json invalid for ${url}: errors[${i}].feature must be a string ('headings' | 'altText' | 'structure' | 'document')`);
+  }
+  if (typeof eo.code !== 'string') {
+    throw new Error(`accessibility.json invalid for ${url}: errors[${i}].code must be a string`);
+  }
+  if (typeof eo.message !== 'string') {
+    throw new Error(`accessibility.json invalid for ${url}: errors[${i}].message must be a string`);
+  }
+}
+
+// --- accessibility-report.json section validators ---
+//
+// `source: null` is explicitly accepted on every section. Per producer §3.3
+// the producer emits null when `tagged === false` (we didn't measure via
+// StructTree) AND `LEGACY_ACCESSIBILITY_REPORT` (the {}-placeholder fallback)
+// also has null source across all sections. Adapter rejecting null would
+// break both the untagged-doc happy path AND the legacy-bundle
+// graceful-degradation contract.
+
+function validateReportScoreSection(v: unknown, name: string, url: string): void {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) {
+    throw new Error(`accessibility-report.json invalid for ${url}: '${name}' must be an object`);
+  }
+  const o = v as Record<string, unknown>;
+  if (
+    o.score !== null &&
+    (typeof o.score !== 'number' ||
+      !Number.isFinite(o.score) ||
+      (o.score as number) < 0 ||
+      (o.score as number) > 1)
+  ) {
+    throw new Error(`accessibility-report.json invalid for ${url}: '${name}.score' must be a finite number in [0, 1] or null`);
+  }
+  if (o.source !== null && !isAccessibilitySource(o.source)) {
+    throw new Error(`accessibility-report.json invalid for ${url}: '${name}.source' must be a non-empty string or null`);
+  }
+}
+
+function validateReportHeadingsSection(v: unknown, url: string): void {
+  validateReportScoreSection(v, 'headings', url);
+  const o = v as Record<string, unknown>;
+  if (!Number.isInteger(o.extracted) || (o.extracted as number) < 0) {
+    throw new Error(`accessibility-report.json invalid for ${url}: 'headings.extracted' must be a non-negative integer`);
+  }
+  if (o.missing !== null && (!Number.isInteger(o.missing) || (o.missing as number) < 0)) {
+    throw new Error(`accessibility-report.json invalid for ${url}: 'headings.missing' must be a non-negative integer or null`);
+  }
+}
+
+function validateReportAltTextSection(v: unknown, url: string): void {
+  validateReportScoreSection(v, 'altText', url);
+  const o = v as Record<string, unknown>;
+  if (!Number.isInteger(o.extracted) || (o.extracted as number) < 0) {
+    throw new Error(`accessibility-report.json invalid for ${url}: 'altText.extracted' must be a non-negative integer`);
+  }
+  if (!Number.isInteger(o.missing) || (o.missing as number) < 0) {
+    throw new Error(`accessibility-report.json invalid for ${url}: 'altText.missing' must be a non-negative integer`);
+  }
+  if (!Number.isInteger(o.imageCount) || (o.imageCount as number) < 0) {
+    throw new Error(`accessibility-report.json invalid for ${url}: 'altText.imageCount' must be a non-negative integer`);
+  }
+}
+
+function validateReportReadingOrderSection(v: unknown, url: string): void {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) {
+    throw new Error(`accessibility-report.json invalid for ${url}: 'readingOrder' must be an object`);
+  }
+  const o = v as Record<string, unknown>;
+  if (
+    o.score !== null &&
+    (typeof o.score !== 'number' ||
+      !Number.isFinite(o.score) ||
+      (o.score as number) < 0 ||
+      (o.score as number) > 1)
+  ) {
+    throw new Error(`accessibility-report.json invalid for ${url}: 'readingOrder.score' must be a finite number in [0, 1] or null`);
+  }
+  if (
+    o.source !== 'passthrough' &&
+    o.source !== 'structtree' &&
+    o.source !== 'heuristic'
+  ) {
+    throw new Error(`accessibility-report.json invalid for ${url}: 'readingOrder.source' must be 'passthrough' | 'structtree' | 'heuristic'`);
+  }
+}
+
+function validateExtractorDiagnostics(v: unknown, url: string): void {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) {
+    throw new Error(`accessibility-report.json invalid for ${url}: 'extractorDiagnostics' must be an object`);
+  }
+  const o = v as Record<string, unknown>;
+  const validateCounterObject = (
+    obj: unknown,
+    name: string,
+    fields: readonly string[],
+  ): void => {
+    if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
+      throw new Error(`accessibility-report.json invalid for ${url}: 'extractorDiagnostics.${name}' must be an object`);
+    }
+    const oo = obj as Record<string, unknown>;
+    for (const f of fields) {
+      if (!Number.isInteger(oo[f]) || (oo[f] as number) < 0) {
+        throw new Error(`accessibility-report.json invalid for ${url}: 'extractorDiagnostics.${name}.${f}' must be a non-negative integer`);
+      }
+    }
+  };
+  validateCounterObject(o.headings, 'headings', [
+    'seen',
+    'skipped_missing_bbox',
+    'emitted',
+    'emitted_with_text',
+  ]);
+  validateCounterObject(o.figures, 'figures', [
+    'seen',
+    'skipped_missing_bbox',
+    'skipped_missing_alt',
+    'emitted_with_alt',
+  ]);
+  validateCounterObject(o.images, 'images', [
+    'enumerated',
+    'matched_to_figure',
+    'unmatched',
+  ]);
 }
 
 // ============================================================

@@ -15,4 +15,13 @@ export type {
   ReadingOrderBlockKind,
   ReadingOrderSource,
   ReadingOrderOptions,
+  // 8c additions — additive on the public surface (1.4.0 minor bump).
+  PageAccessibility,
+  AccessibilityReport,
+  AccessibilityRegion,
+  AccessibilityHeading,
+  AccessibilityAltText,
+  AccessibilityOptions,
+  AccessibilitySource,
+  RemediationStatus,
 } from './PreRenderedPageSource';
