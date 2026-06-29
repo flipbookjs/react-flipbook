@@ -121,8 +121,7 @@ export const ToolbarShell = forwardRef<HTMLDivElement, ToolbarShellProps>(
       // before registerPart fires), but the optional-chain is free and the
       // alternative (crash on user input) is worse-than-defensive. Not a Rule
       // 3 violation: each check defends against a documented legitimate
-      // transition state, not a hypothetical "what if the reducer breaks"
-      // (see ZoomReadout's intentional NO-isFinite-guard for that contrast).
+      // transition state, not a hypothetical "what if the reducer breaks".
       if (!target?.current) return;
       target.current.focus();
       // Belt-and-suspenders: real browsers fire the focus event synchronously

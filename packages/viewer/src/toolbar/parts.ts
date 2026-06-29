@@ -23,9 +23,18 @@ export { SelectionModeButton } from './buttons/SelectionModeButton';
 export { ThemeToggleButton } from './buttons/ThemeToggleButton';
 export { ThumbnailsToggleButton } from './buttons/ThumbnailsToggleButton';
 
-// Readouts (2).
+// Readouts (1).
 export { PageReadout } from './readouts/PageReadout';
-export { ZoomReadout } from './readouts/ZoomReadout';
+
+// Menus (2).
+export {
+  ToolbarMenu,
+  type ToolbarMenuProps,
+  type ToolbarMenuItem,
+  type ToolbarMenuSeparator,
+  type ToolbarMenuEntry,
+} from './ToolbarMenu';
+export { ZoomMenu, type ZoomMenuProps } from './ZoomMenu';
 
 // Labels (read-only — consumers introspect; a future 1.x minor will add an override surface).
 export { LABELS } from './labels';

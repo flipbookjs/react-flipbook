@@ -14,7 +14,7 @@ import { DownloadButton } from '../toolbar/buttons/DownloadButton';
 import { SelectionModeButton } from '../toolbar/buttons/SelectionModeButton';
 import { ThemeToggleButton } from '../toolbar/buttons/ThemeToggleButton';
 import { PageReadout } from '../toolbar/readouts/PageReadout';
-import { ZoomReadout } from '../toolbar/readouts/ZoomReadout';
+import { ZoomMenu } from '../toolbar/ZoomMenu';
 import type { FlipbookHookActions } from '../hooks/useFlipbook';
 import type { PageSource } from '../types/PageSource';
 
@@ -70,7 +70,7 @@ describe('Parts rendering — narrow-selector + memo perf claim', () => {
     const page = makeCounter();
     const zoomIn = makeCounter();
     const zoomOut = makeCounter();
-    const zoomReadout = makeCounter();
+    const zoomMenu = makeCounter();
     const fullScreen = makeCounter();
     const print = makeCounter();
     const download = makeCounter();
@@ -98,7 +98,7 @@ describe('Parts rendering — narrow-selector + memo perf claim', () => {
           <Profiler id="next" onRender={next.onRender}><NextButton /></Profiler>
           <Profiler id="page" onRender={page.onRender}><PageReadout /></Profiler>
           <Profiler id="zoomOut" onRender={zoomOut.onRender}><ZoomOutButton /></Profiler>
-          <Profiler id="zoomReadout" onRender={zoomReadout.onRender}><ZoomReadout /></Profiler>
+          <Profiler id="zoomMenu" onRender={zoomMenu.onRender}><ZoomMenu /></Profiler>
           <Profiler id="zoomIn" onRender={zoomIn.onRender}><ZoomInButton /></Profiler>
           <Profiler id="fullScreen" onRender={fullScreen.onRender}><FullScreenButton /></Profiler>
           <Profiler id="print" onRender={print.onRender}><PrintButton /></Profiler>
@@ -132,7 +132,7 @@ describe('Parts rendering — narrow-selector + memo perf claim', () => {
       page: page.counts.update,
       zoomIn: zoomIn.counts.update,
       zoomOut: zoomOut.counts.update,
-      zoomReadout: zoomReadout.counts.update,
+      zoomMenu: zoomMenu.counts.update,
       fullScreen: fullScreen.counts.update,
       print: print.counts.update,
       download: download.counts.update,
@@ -152,7 +152,7 @@ describe('Parts rendering — narrow-selector + memo perf claim', () => {
     // Unrelated parts MUST NOT have re-rendered:
     expect(zoomIn.counts.update).toBe(baseline.zoomIn);
     expect(zoomOut.counts.update).toBe(baseline.zoomOut);
-    expect(zoomReadout.counts.update).toBe(baseline.zoomReadout);
+    expect(zoomMenu.counts.update).toBe(baseline.zoomMenu);
     expect(fullScreen.counts.update).toBe(baseline.fullScreen);
     expect(print.counts.update).toBe(baseline.print);
     expect(download.counts.update).toBe(baseline.download);

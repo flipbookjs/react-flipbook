@@ -5,8 +5,8 @@
  * translated labels).
  *
  * `1.0.0` hardcodes English. Consumers wanting different labels per-part override
- * by passing `aria-label` (for buttons) at the call site. Readouts (`PageReadout`,
- * `ZoomReadout`) generate visible text via the template functions below;
+ * by passing `aria-label` (for buttons) at the call site. Readouts (`PageReadout`)
+ * and menus (`ZoomMenu`) generate visible text via the template functions below;
  * overriding them requires forking the part via the sub-path import.
  *
  * The `LABELS` const is exported from `parts.ts` so consumer code can read
@@ -25,8 +25,11 @@ export const LABELS = {
   pageReadoutLoading: 'Page not yet available',
   zoomIn: 'Zoom in',
   zoomOut: 'Zoom out',
-  zoomReadout: (percent: number) => `Zoom level: ${percent}%`,
-  zoomReadoutLoading: 'Zoom level not yet available',
+  zoomMenuTriggerLabel: (percent: number | null) =>
+    percent === null
+      ? 'Zoom menu, level not yet available'
+      : `Zoom menu, current level ${percent}%`,
+  zoomMenuPopoverLabel: 'Zoom levels',
   // Toggle buttons use aria-pressed (not aria-label flipping) for state — see
   // FullScreenButton/SelectionModeButton/ThemeToggleButton JSDocs. The label
   // stays constant; aria-pressed conveys the on/off state. This avoids the

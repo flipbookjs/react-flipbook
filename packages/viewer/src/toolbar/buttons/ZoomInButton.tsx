@@ -9,7 +9,7 @@ import { LABELS } from '../labels';
 /**
  * `actions.zoomIn()` from 6A wraps the existing 5C zoom step-table — if the
  * user is already at the maximum scale, the dispatch produces the same scale
- * (no-op at the snapshot level), and `ZoomReadout`'s `Math.round(scale * 100)`
+ * (no-op at the snapshot level), and `ZoomMenu`'s `Math.round(scale * 100)`
  * selector returns the same percent, so `Object.is` skips its re-render. So
  * the button does NOT need an explicit max-scale disabled check here.
  *

@@ -176,6 +176,75 @@
   min-width: 3.5rem;
 }
 
+/* Menu wrapper — owns positioning context for the popover. */
+.fbjs-toolbar__menu {
+  position: relative;
+  display: inline-flex;
+}
+
+/* Generic trigger class — domain-neutral; consumers add their own
+   visual classes (e.g., ZoomMenu adds .fbjs-toolbar__readout + --zoom). */
+.fbjs-toolbar__menu-trigger {
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.fbjs-toolbar__menu-trigger:focus-visible {
+  outline: 2px solid var(--fbjs-toolbar-fg);
+  outline-offset: 2px;
+}
+
+/* Popover — always drops upward from the trigger. The toolbar lives at
+   the bottom of the viewport so room above is guaranteed. */
+.fbjs-toolbar__menu-popover {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 0.25rem 0;
+  list-style: none;
+  min-width: 8rem;
+  background: var(--fbjs-toolbar-bg, #fff);
+  color: var(--fbjs-toolbar-fg, #111);
+  border: 1px solid var(--fbjs-border);
+  border-radius: 0.375rem;
+  box-shadow: var(--fbjs-popover-shadow, 0 4px 12px rgba(0, 0, 0, 0.15));
+  z-index: 10;
+}
+
+.fbjs-toolbar__menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.375rem 0.75rem;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-align: start;
+  font: inherit;
+  color: inherit;
+}
+.fbjs-toolbar__menu-item:hover,
+.fbjs-toolbar__menu-item:focus-visible {
+  background: var(--fbjs-border);
+  outline: 0;
+}
+
+.fbjs-toolbar__menu-item-check {
+  display: inline-flex;
+  width: 1rem;
+  flex-shrink: 0;
+}
+
+.fbjs-toolbar__menu-separator {
+  height: 1px;
+  background: var(--fbjs-border);
+  margin: 0.25rem 0;
+  list-style: none;
+}
+
 /* =====================================================================
    Responsive behavior
    =====================================================================

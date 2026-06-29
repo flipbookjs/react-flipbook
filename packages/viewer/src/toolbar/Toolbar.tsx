@@ -13,7 +13,7 @@ import { SelectionModeButton } from './buttons/SelectionModeButton';
 import { ThemeToggleButton } from './buttons/ThemeToggleButton';
 import { ThumbnailsToggleButton } from './buttons/ThumbnailsToggleButton';
 import { PageReadout } from './readouts/PageReadout';
-import { ZoomReadout } from './readouts/ZoomReadout';
+import { ZoomMenu } from './ZoomMenu';
 import {
   resolveToolbarVisibility,
   type VisibilityProps,
@@ -153,7 +153,7 @@ export const Toolbar = memo(function Toolbar({
           <div className="fbjs-toolbar__section fbjs-toolbar__section--center">
             <div className="fbjs-toolbar__group">
               <ZoomOutButton />
-              <ZoomReadout />
+              <ZoomMenu />
               <ZoomInButton />
             </div>
           </div>

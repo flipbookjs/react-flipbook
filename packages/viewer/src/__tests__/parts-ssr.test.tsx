@@ -9,7 +9,7 @@ import {
   FullScreenButton,
   PrintButton, DownloadButton,
   SelectionModeButton, ThemeToggleButton,
-  PageReadout, ZoomReadout,
+  PageReadout, ZoomMenu,
 } from '../toolbar/parts';
 import type { PageSource } from '../types/PageSource';
 
@@ -33,7 +33,7 @@ describe('Toolbar parts — SSR safety', () => {
           <NextButton />
           <PageReadout />
           <ZoomOutButton />
-          <ZoomReadout />
+          <ZoomMenu />
           <ZoomInButton />
           <FullScreenButton />
           <PrintButton />
@@ -147,7 +147,7 @@ describe('Toolbar parts — SSR safety', () => {
       <FlipbookProvider source={source}>
         <ToolbarShell>
           <PageReadout />
-          <ZoomReadout />
+          <ZoomMenu />
         </ToolbarShell>
       </FlipbookProvider>,
     );

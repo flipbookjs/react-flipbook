@@ -13,7 +13,7 @@ import { DownloadButton } from '../toolbar/buttons/DownloadButton';
 import { SelectionModeButton } from '../toolbar/buttons/SelectionModeButton';
 import { ThemeToggleButton } from '../toolbar/buttons/ThemeToggleButton';
 import { PageReadout } from '../toolbar/readouts/PageReadout';
-import { ZoomReadout } from '../toolbar/readouts/ZoomReadout';
+import { ZoomMenu } from '../toolbar/ZoomMenu';
 import type { PageSource } from '../types/PageSource';
 
 expect.extend(toHaveNoViolations);
@@ -35,7 +35,7 @@ function FullToolbar() {
       <NextButton />
       <PageReadout />
       <ZoomOutButton />
-      <ZoomReadout />
+      <ZoomMenu />
       <ZoomInButton />
       <FullScreenButton />
       <PrintButton />
@@ -112,7 +112,7 @@ describe('Toolbar parts — automated a11y audit (jest-axe)', () => {
       <FlipbookProvider source={source}>
         <ToolbarShell>
           <PageReadout />
-          <ZoomReadout />
+          <ZoomMenu />
         </ToolbarShell>
       </FlipbookProvider>,
     );
@@ -123,7 +123,7 @@ describe('Toolbar parts — automated a11y audit (jest-axe)', () => {
     // implies aria-live=polite per ARIA spec; explicit attribute would be
     // redundant).
     const page = container.querySelector('[data-testid="fbjs-page-readout"]');
-    const zoom = container.querySelector('[data-testid="fbjs-zoom-readout"]');
+    const zoom = container.querySelector('[data-testid="fbjs-zoom-menu-readout-live"]');
     expect(page).toHaveAttribute('role', 'status');
     expect(page).not.toHaveAttribute('aria-live');
     expect(zoom).toHaveAttribute('role', 'status');

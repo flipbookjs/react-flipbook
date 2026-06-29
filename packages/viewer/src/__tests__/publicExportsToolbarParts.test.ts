@@ -17,10 +17,10 @@ import type {
 // uppercase letters sort before lowercase, so `useToolbarPart` lands LAST).
 // If a part is added or removed in the future, this constant must change
 // too — the test forces a deliberate update rather than silently accepting
-// drift. Count = 12 part components + 4 utility exports (ToolbarShell,
+// drift. Count = 13 part components + 4 utility exports (ToolbarShell,
 // useToolbarPart, ToolbarShellContext, LABELS) + 2 main-entry re-exports
 // (Toolbar, ThumbnailPanel — parts.ts re-exports these for consumer
-// ergonomics: one-import composition) = 18.
+// ergonomics: one-import composition) = 19.
 const EXPECTED_RUNTIME_EXPORTS = [
   'DownloadButton',
   'FullScreenButton',
@@ -34,11 +34,12 @@ const EXPECTED_RUNTIME_EXPORTS = [
   'ThumbnailPanel',
   'ThumbnailsToggleButton',
   'Toolbar',
+  'ToolbarMenu',
   'ToolbarShell',
   'ToolbarShellContext',
   'ZoomInButton',
+  'ZoomMenu',
   'ZoomOutButton',
-  'ZoomReadout',
   'useToolbarPart',
 ].sort();
 
@@ -56,7 +57,7 @@ describe('public API exports — toolbar-parts sub-path', () => {
     expect(typeof ToolbarPartsApi.LABELS.download).toBe('string');
   });
 
-  it('the 12 part components are React.memo + forwardRef objects, the hook is a function', () => {
+  it('the 13 part components are React.memo + forwardRef objects, the hook is a function', () => {
     // React.memo(forwardRef(fn)) returns an object — `typeof` is 'object'.
     expect(typeof ToolbarPartsApi.PrevButton).toBe('object');
     expect(typeof ToolbarPartsApi.NextButton).toBe('object');
@@ -69,7 +70,8 @@ describe('public API exports — toolbar-parts sub-path', () => {
     expect(typeof ToolbarPartsApi.ThemeToggleButton).toBe('object');
     expect(typeof ToolbarPartsApi.ThumbnailsToggleButton).toBe('object');
     expect(typeof ToolbarPartsApi.PageReadout).toBe('object');
-    expect(typeof ToolbarPartsApi.ZoomReadout).toBe('object');
+    expect(typeof ToolbarPartsApi.ToolbarMenu).toBe('object');
+    expect(typeof ToolbarPartsApi.ZoomMenu).toBe('object');
     // ToolbarShell + Toolbar are also forwardRef'd; ThumbnailPanel is a
     // memoized function component.
     expect(typeof ToolbarPartsApi.ToolbarShell).toBe('object');

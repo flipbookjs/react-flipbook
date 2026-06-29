@@ -8,9 +8,9 @@ import { LABELS } from '../labels';
  * placeholder: em-dash ('—') instead of 'Page 0 of 0' so screen readers
  * don't announce zero-data during the loading window.
  *
- * Visible content matches the announced content here (unlike `ZoomReadout`)
- * because the page-readout text IS reasonably compact — "Page 5 of 12"
- * doesn't bloat the toolbar.
+ * Visible content matches the announced content here because the
+ * page-readout text IS reasonably compact — "Page 5 of 12" doesn't bloat
+ * the toolbar.
  *
  * Does NOT call `useToolbarPart` — non-focusable per WAI-ARIA toolbar pattern
  * (only buttons participate in roving-tabindex; status text doesn't).

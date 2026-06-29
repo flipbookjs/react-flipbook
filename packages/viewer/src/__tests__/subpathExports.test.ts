@@ -10,7 +10,8 @@ import {
   FullScreenButton,
   PrintButton, DownloadButton,
   SelectionModeButton, ThemeToggleButton,
-  PageReadout, ZoomReadout,
+  PageReadout,
+  ToolbarMenu, ZoomMenu,
   LABELS,
 } from '../toolbar/parts';
 
@@ -39,7 +40,8 @@ const EXPECTED_RUNTIME_EXPORTS = [
   'ThemeToggleButton',
   'ThumbnailsToggleButton',
   'PageReadout',
-  'ZoomReadout',
+  'ToolbarMenu',
+  'ZoomMenu',
   'LABELS',
   'Toolbar',
   'ThumbnailPanel',
@@ -68,7 +70,8 @@ describe('toolbar-parts sub-path public API', () => {
     expect(typeof SelectionModeButton).toBe('object');
     expect(typeof ThemeToggleButton).toBe('object');
     expect(typeof PageReadout).toBe('object');
-    expect(typeof ZoomReadout).toBe('object');
+    expect(typeof ToolbarMenu).toBe('object');   // memo + forwardRef wraps to $$typeof
+    expect(typeof ZoomMenu).toBe('object');
   });
 
   it('exports LABELS with the documented English strings', () => {
@@ -77,8 +80,10 @@ describe('toolbar-parts sub-path public API', () => {
     expect(LABELS.nextPage).toBe('Next page');
     expect(typeof LABELS.pageReadout).toBe('function');
     expect(LABELS.pageReadout(3, 10)).toBe('Page 3 of 10');
-    expect(typeof LABELS.zoomReadout).toBe('function');
-    expect(LABELS.zoomReadout(125)).toBe('Zoom level: 125%');
+    expect(typeof LABELS.zoomMenuTriggerLabel).toBe('function');
+    expect(LABELS.zoomMenuTriggerLabel(125)).toBe('Zoom menu, current level 125%');
+    expect(LABELS.zoomMenuTriggerLabel(null)).toBe('Zoom menu, level not yet available');
+    expect(LABELS.zoomMenuPopoverLabel).toBe('Zoom levels');
   });
 
   it('exports types usable as value annotations', () => {
@@ -114,5 +119,7 @@ describe('toolbar-parts sub-path — main entry is NOT polluted', () => {
     expect(keys).not.toContain('NextButton');
     expect(keys).not.toContain('ToolbarShell');
     expect(keys).not.toContain('useToolbarPart');
+    expect(keys).not.toContain('ToolbarMenu');
+    expect(keys).not.toContain('ZoomMenu');
   });
 });
