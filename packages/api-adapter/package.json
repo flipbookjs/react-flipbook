@@ -19,8 +19,9 @@
     "dev": "vite build --watch"
   },
   "peerDependencies": {
-    "@flipbookjs/react-viewer": "^1.0.0 || ^2.0.0"
+    "@flipbookjs/react-viewer": "^1.0.0 || ^2.0.0 || ^3.0.0"
   },
+  "sideEffects": false,
   "keywords": [
     "react",
     "pdf",

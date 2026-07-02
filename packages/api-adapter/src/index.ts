@@ -25,3 +25,11 @@ export type {
   AccessibilitySource,
   RemediationStatus,
 } from './PreRenderedPageSource';
+
+// 1.5.0 additions — additive public surface.
+export { createFlipbookSource } from './createFlipbookSource';
+export type { CreateFlipbookSourceOptions } from './createFlipbookSource';
+export type {
+  FlipbookDocument,
+  FlipbookDocumentStatus,
+} from './FlipbookDocument';
