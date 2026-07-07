@@ -48,10 +48,9 @@ function FullToolbar() {
 
 describe('Toolbar parts — automated a11y audit (jest-axe)', () => {
   // Scope axe to the toolbar element so unrelated FlipbookProvider chrome
-  // (e.g., its loading-state `<div class="fbjs-loading" aria-label="...">`,
-  // an existing 6A pattern that triggers axe's aria-prohibited-attr rule)
-  // doesn't false-positive these toolbar-specific audits. The test names
-  // describe toolbar invariants; the scoping preserves that intent.
+  // (loading overlay, error banner, stage) isn't part of the audit surface.
+  // The test names describe toolbar invariants; the scoping preserves that
+  // intent.
   it('full toolbar in loading state has zero ARIA violations', async () => {
     const source = makeSource();
     const { container } = render(

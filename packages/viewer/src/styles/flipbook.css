@@ -64,20 +64,27 @@
 }
 
 .fbjs-loading {
+  position: absolute;
+  inset: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 100%;
-  height: 100%;
+  color: var(--fbjs-fg-muted);
 }
 
 .fbjs-loading-spinner {
-  width: 2rem;
-  height: 2rem;
-  border: 3px solid #e0e0e0;
-  border-top-color: #666;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 3px solid var(--fbjs-border);
+  border-top-color: var(--fbjs-accent);
   border-radius: 50%;
   animation: fbjs-spin 0.8s linear infinite;
+}
+
+.fbjs-loading-label {
+  margin-top: 0.75rem;
+  font-size: 0.875rem;
 }
 
 @keyframes fbjs-spin {

@@ -37,7 +37,8 @@ describe('Flipbook', () => {
       init: () => new Promise(() => {}), // never resolves
     });
     render(<Flipbook source={source} />);
-    expect(screen.getByLabelText('Loading document')).toBeTruthy();
+    const loaderText = screen.getByText('Loading…');
+    expect(loaderText.closest('[role="status"]')).toHaveClass('fbjs-loading');
   });
 
   it('renders page after source loads', async () => {

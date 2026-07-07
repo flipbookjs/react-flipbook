@@ -23,10 +23,10 @@ describe('Flipbook a11y audit (jest-axe, scoped to .fbjs-root)', () => {
     await waitFor(() => {
       expect(container.querySelector('[role="toolbar"]')).not.toBeNull();
     });
-    // Scope axe to .fbjs-root — captures both toolbars + the container + theme runtime
-    // but excludes any unrelated 6A chrome (e.g., fbjs-loading wrapper that lives
-    // outside .fbjs-root or that's not a toolbar concern). Matches 6B's parts-a11y
-    // scoping pattern.
+    // Scope axe to .fbjs-root — captures both toolbars + the container +
+    // theme runtime + loading overlay + stage. Matches parts-a11y.test.tsx's
+    // narrower scoping pattern (that one scopes to the toolbar element
+    // specifically for toolbar-invariant audits).
     const root = container.querySelector('.fbjs-root')!;
     const results = await axe(root);
     expect(results).toHaveNoViolations();

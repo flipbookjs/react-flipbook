@@ -76,3 +76,41 @@ describe('.fbjs-root layout contract (regression: post-6C blank-screen bug)', ()
     expect(body).not.toMatch(/height:\s*100%/);
   });
 });
+
+describe('.fbjs-loading contract', () => {
+  // The document-level loading overlay uses absolute positioning inside
+  // `.fbjs-container` so it stays centered independent of the flex row's
+  // justify/align state. Spacing between the spinner and label lives on
+  // `.fbjs-loading-label` as `margin-top`, not on `.fbjs-loading` as flex
+  // `gap` — same convention already used elsewhere in the viewer.
+
+  it('flipbook.css declares .fbjs-loading as an absolute overlay filling its container', () => {
+    const body = ruleBody(readStyle('flipbook.css'), '.fbjs-loading');
+    expect(body).toMatch(/position:\s*absolute/);
+    expect(body).toMatch(/inset:\s*0/);
+  });
+
+  it('flipbook.css spaces .fbjs-loading children via label margin, not flex gap', () => {
+    const body = ruleBody(readStyle('flipbook.css'), '.fbjs-loading');
+    expect(body).not.toMatch(/gap:/);
+  });
+
+  it('flipbook.css uses the muted-fg theme token for .fbjs-loading text color', () => {
+    const body = ruleBody(readStyle('flipbook.css'), '.fbjs-loading');
+    expect(body).toMatch(/color:\s*var\(--fbjs-fg-muted\)/);
+  });
+
+  it('flipbook.css uses theme tokens (not hardcoded hex) for .fbjs-loading-spinner border', () => {
+    const body = ruleBody(readStyle('flipbook.css'), '.fbjs-loading-spinner');
+    expect(body).toMatch(/border:\s*3px\s+solid\s+var\(--fbjs-border\)/);
+    expect(body).toMatch(/border-top-color:\s*var\(--fbjs-accent\)/);
+    // No hardcoded hex values on any .fbjs-loading* rule after the theming pass.
+    expect(body).not.toMatch(/#[0-9a-fA-F]{3,8}/);
+  });
+
+  it('flipbook.css declares .fbjs-loading-label with deterministic spacing', () => {
+    const body = ruleBody(readStyle('flipbook.css'), '.fbjs-loading-label');
+    expect(body).toMatch(/margin-top:\s*0\.75rem/);
+    expect(body).toMatch(/font-size:\s*0\.875rem/);
+  });
+});
