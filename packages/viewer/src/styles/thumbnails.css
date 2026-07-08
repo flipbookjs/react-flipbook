@@ -56,11 +56,12 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-.fbjs-thumbnail-button:not([aria-current="page"]):hover:not([aria-disabled="true"]) {
+.fbjs-thumbnail-button:not([aria-current="page"]):not([data-current-spread="true"]):hover:not([aria-disabled="true"]) {
   outline-color: var(--fbjs-border);
 }
 
-.fbjs-thumbnail-button[aria-current="page"] {
+.fbjs-thumbnail-button[aria-current="page"],
+.fbjs-thumbnail-button[data-current-spread="true"] {
   outline-color: var(--fbjs-fg);
 }
 

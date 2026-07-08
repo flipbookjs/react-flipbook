@@ -415,6 +415,10 @@ The `2.0.0` migration plan will ship with a separate MIGRATION-v2.md guide listi
 
 **2.0.0 status:** the `thumbnailSize` prop was removed in `2.0.0` and replaced by the `thumbnailDensity` / `thumbnailWidth` discriminated union (on `<Flipbook>`) and `density` / `width` (on `<ThumbnailPanel>`). See `MIGRATION-v2.md` for the full migration table. The §10 stability surface above otherwise carries forward unchanged into `2.x` for every other prop, hook, action, state field, and CSS class — `thumbnailSize` is the only breaking surface change.
 
+### Added fields (per minor release)
+
+- **`FlipbookHookState.currentSpreadPages: readonly number[]`** (added in `3.2.0`) — 1-indexed page numbers of the current spread, in visual left-to-right order. Length 1 in `viewMode: 'single'` and for cover / last-solo spreads; length 2 for interior dual-cover spreads. Reflects the LAST KNOWN reducer state (see the `useFlipbook` hook JSDoc caveat in `src/hooks/useFlipbook.ts`) — consumers should guard reads on `fb.status === 'ready'`. Covered by `1.x` additive-evolution rules from `3.2.0` forward. Consumers use this for spread-aware UI affordances (e.g., highlighting both pages of the current spread in a thumbnail panel).
+
 ### What's deferred to a future MINOR release (not breaking)
 
 See §11 for the forward-compatibility plan: text content extraction (v0.2 work, now planned for a `1.x` minor), link annotations, document outline, i18n via `ToolbarLabelsContext`. All additive.

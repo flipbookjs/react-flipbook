@@ -24,15 +24,28 @@ interface ThumbnailButtonProps {
  * One thumbnail button. Renders a real `<ThumbnailCanvas>` when
  * `inWindow === true`, an empty placeholder otherwise.
  *
- * Two ARIA states tracked SEPARATELY:
+ * Three UI states tracked SEPARATELY:
  *
- *   1. `aria-current="page"` — the current document page. Derived from
- *      `state.pageNumber` via a per-button `useFlipbookSelector`: matches
- *      when `pageIndex + 1 === pageNumber`. In dual-cover mode this marks
- *      only the LEADING page of the current spread (spread-aware
- *      highlighting deferred to a later release).
+ *   1. `aria-current="page"` — the canonical current page for AT. Derived
+ *      from `state.pageNumber` via a per-button `useFlipbookSelector`:
+ *      matches when `pageIndex + 1 === pageNumber`. Follows the repo's
+ *      canonical-current convention (ToolbarMenu.tsx:17-23): even when
+ *      multiple items would visually match a current state, only ONE gets
+ *      aria-current so screen readers announce a single "current" landmark.
+ *      In dual-cover mode this is the LEADING page of the current spread.
  *
- *   2. `tabIndex` — the roving tabstop. Derived from the panel's external
+ *   2. `data-current-spread="true"` — visual affordance ONLY, not exposed
+ *      to AT. Derived from `state.currentSpreadPages` via a per-button
+ *      `useFlipbookSelector`: matches when `pageIndex + 1` is in the
+ *      current spread's page list. In dual-cover mode both pages of the
+ *      current spread get the attribute; covers and last-solo spreads mark
+ *      just the one page they contain. The CSS in thumbnails.css keys the
+ *      "current page" style on either `aria-current="page"` OR
+ *      `data-current-spread="true"`, so sighted users see both pages of
+ *      the spread highlighted while AT still announces one canonical
+ *      current page.
+ *
+ *   3. `tabIndex` — the roving tabstop. Derived from the panel's external
  *      `ActiveIndexStore` via `useSyncExternalStore` with a per-button
  *      boolean selector (`() => store.get() === pageIndex`). React's
  *      `useSyncExternalStore` only re-renders when the boolean flips —
@@ -65,6 +78,14 @@ export const ThumbnailButton = memo(function ThumbnailButton({
   const { store, registerButton, focusIndex } = useThumbnailPanelContext();
   const isCurrent = useFlipbookSelector(
     (s) => s.state.pageNumber - 1 === pageIndex,
+    Object.is,
+  );
+  // Visual spread affordance — TRUE for both pages of a dual-cover spread.
+  // Decoupled from `aria-current` so ARIA stays canonical (only the leading
+  // page has aria-current="page" per the ToolbarMenu.tsx:17-23 convention).
+  // See `data-current-spread` on the <button> element below.
+  const isInCurrentSpread = useFlipbookSelector(
+    (s) => s.state.currentSpreadPages.includes(pageIndex + 1),
     Object.is,
   );
   // Selector returns boolean; only re-renders this button when its
@@ -129,6 +150,7 @@ export const ThumbnailButton = memo(function ThumbnailButton({
       style={{ width: `${width}px` }}
       aria-label={LABELS.thumbnailButton(pageIndex + 1, pageCount)}
       aria-current={isCurrent ? 'page' : undefined}
+      data-current-spread={isInCurrentSpread ? 'true' : undefined}
       tabIndex={isActive ? 0 : -1}
       data-page-index={pageIndex}
       data-testid={`fbjs-thumbnail-${pageIndex}`}

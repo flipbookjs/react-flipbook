@@ -104,11 +104,10 @@ describe('ThumbnailPanel', () => {
   it('clicking a thumbnail dispatches goToPage with 1-indexed value', async () => {
     const source = makeSource(4);
     const actionsRef = { current: null as FlipbookHookActions | null };
-    // viewMode="single" so pageNumber === pageIndex + 1 (1:1 tracking). In
-    // dual-cover mode, KL3's "aria-current on leading page only" means
-    // clicking thumb-2 (page 3) lands on spread 1 (pages 1+2) → pageNumber=2
-    // → aria-current on thumb-1 instead. This test is about the dispatch
-    // contract, not dual-cover spread semantics.
+    // viewMode="single" so the leading-page selector gives 1:1 tracking:
+    // exactly one thumbnail has aria-current. Dual-cover spread-aware
+    // highlighting (via data-current-spread on both pages) is covered by
+    // dedicated tests below.
     render(
       <FlipbookProvider source={source} viewMode="single">
         <CaptureActions actionsRef={actionsRef} />
@@ -122,6 +121,85 @@ describe('ThumbnailPanel', () => {
     // Verify via aria-current after dispatch.
     await waitFor(() => {
       expect(screen.getByTestId('fbjs-thumbnail-2')).toHaveAttribute('aria-current', 'page');
+    });
+  });
+
+  it('dual-cover mode: clicking a right-page thumbnail marks BOTH pages of the spread with data-current-spread', async () => {
+    const source = makeSource(6);
+    const actionsRef = { current: null as FlipbookHookActions | null };
+    render(
+      <FlipbookProvider source={source} viewMode="dual-cover">
+        <CaptureActions actionsRef={actionsRef} />
+        <ThumbnailPanel />
+      </FlipbookProvider>,
+    );
+    act(() => { actionsRef.current!.setThumbnailsOpen(true); });
+    await waitFor(() => screen.getByTestId('fbjs-thumbnail-2'));
+    // In dual-cover mode with a cover, spread 1 is pages 2-3 (0-indexed: 1-2).
+    // Click the right thumbnail (pageIndex=2, page 3).
+    act(() => { screen.getByTestId('fbjs-thumbnail-2').click(); });
+    await waitFor(() => {
+      // Visual affordance covers BOTH pages of the current spread.
+      expect(screen.getByTestId('fbjs-thumbnail-1')).toHaveAttribute('data-current-spread', 'true');
+      expect(screen.getByTestId('fbjs-thumbnail-2')).toHaveAttribute('data-current-spread', 'true');
+    });
+    // Adjacent thumbnails outside the spread do NOT.
+    expect(screen.getByTestId('fbjs-thumbnail-0')).not.toHaveAttribute('data-current-spread');
+    expect(screen.getByTestId('fbjs-thumbnail-3')).not.toHaveAttribute('data-current-spread');
+  });
+
+  it('dual-cover mode: aria-current stays canonical — only the leading page has aria-current="page"', async () => {
+    const source = makeSource(6);
+    const actionsRef = { current: null as FlipbookHookActions | null };
+    render(
+      <FlipbookProvider source={source} viewMode="dual-cover">
+        <CaptureActions actionsRef={actionsRef} />
+        <ThumbnailPanel />
+      </FlipbookProvider>,
+    );
+    act(() => { actionsRef.current!.setThumbnailsOpen(true); });
+    await waitFor(() => screen.getByTestId('fbjs-thumbnail-2'));
+    act(() => { screen.getByTestId('fbjs-thumbnail-2').click(); });
+    await waitFor(() => {
+      // Leading page (page 2, pageIndex=1) is the ONLY thumbnail with aria-current.
+      expect(screen.getByTestId('fbjs-thumbnail-1')).toHaveAttribute('aria-current', 'page');
+    });
+    // Right page has data-current-spread but NOT aria-current — canonical rule.
+    expect(screen.getByTestId('fbjs-thumbnail-2')).not.toHaveAttribute('aria-current');
+  });
+
+  it('dual-cover mode: clicking within the current spread preserves focus on the clicked thumbnail', async () => {
+    // If the user is already on spread 1 (pages 2-3) and clicks the right
+    // thumbnail (page 3), focus stays on the right thumbnail. The layout
+    // effect at ThumbnailPanel.tsx:217-219 only re-anchors the roving
+    // tabstop when pageNumber CHANGES — clicking within the current spread
+    // doesn't change pageNumber (still resolves to the leading page).
+    const source = makeSource(6);
+    const actionsRef = { current: null as FlipbookHookActions | null };
+    render(
+      <FlipbookProvider source={source} viewMode="dual-cover">
+        <CaptureActions actionsRef={actionsRef} />
+        <ThumbnailPanel />
+      </FlipbookProvider>,
+    );
+    act(() => { actionsRef.current!.setThumbnailsOpen(true); });
+    // Wait for source-ready BEFORE calling goToPage — goToPage is a no-op
+    // while status is 'loading' (see FlipbookProvider.tsx:655-663). The
+    // presence of a rendered thumbnail is a reliable readiness signal, since
+    // ThumbnailPanel only renders buttons post-ready.
+    await waitFor(() => screen.getByTestId('fbjs-thumbnail-0'));
+    // Navigate to spread 1 (pages 2-3).
+    act(() => { actionsRef.current!.goToPage(2); });
+    await waitFor(() => {
+      expect(screen.getByTestId('fbjs-thumbnail-1')).toHaveAttribute('aria-current', 'page');
+    });
+    // Now click the right thumbnail of the current spread.
+    act(() => { screen.getByTestId('fbjs-thumbnail-2').click(); });
+    const rightThumb = screen.getByTestId('fbjs-thumbnail-2');
+    // Roving tabstop stays on the clicked (right) thumbnail — NOT re-anchored
+    // to the leading page.
+    await waitFor(() => {
+      expect(rightThumb).toHaveAttribute('tabindex', '0');
     });
   });
 

@@ -114,3 +114,23 @@ describe('.fbjs-loading contract', () => {
     expect(body).toMatch(/font-size:\s*0\.875rem/);
   });
 });
+
+describe('.fbjs-thumbnail-button current-affordance contract', () => {
+  // The current-affordance style and the hover carve-out MUST stay symmetric:
+  // both key on `[aria-current="page"]` AND `[data-current-spread="true"]`, or
+  // the right thumbnail of a dual-cover spread visually loses its highlight
+  // under hover (specificity fight). UI attribute-level tests would let a
+  // source-level regression through — JSDOM doesn't compute CSS.
+
+  it('thumbnails.css current-affordance selector matches BOTH aria-current AND data-current-spread', () => {
+    const css = stripComments(readStyle('thumbnails.css'));
+    // Both attribute selectors must appear together as a comma-separated list.
+    expect(css).toMatch(/\.fbjs-thumbnail-button\[aria-current="page"\]\s*,\s*\.fbjs-thumbnail-button\[data-current-spread="true"\]/);
+  });
+
+  it('thumbnails.css hover carve-out excludes BOTH current markers', () => {
+    const css = stripComments(readStyle('thumbnails.css'));
+    // Hover rule must NOT apply when EITHER current marker is present.
+    expect(css).toMatch(/\.fbjs-thumbnail-button:not\(\[aria-current="page"\]\):not\(\[data-current-spread="true"\]\):hover/);
+  });
+});

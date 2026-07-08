@@ -7,6 +7,7 @@ import {
   SSR_HOOK,
   SSR_ACTIONS,
   SSR_HELPERS,
+  SSR_STATE,
   type FlipbookHook,
 } from '../hooks/useFlipbook';
 import type { PageSource } from '../types/PageSource';
@@ -325,5 +326,101 @@ describe('actions.enterFullScreen — wraps requestFullscreen + resolves on tran
       HTMLElement.prototype.requestFullscreen = originalRequestFs;
       document.exitFullscreen = originalExitFs;
     }
+  });
+});
+
+describe('useFlipbook().state.currentSpreadPages — hook contract', () => {
+  it('SSR sentinel exposes an empty (frozen) array', () => {
+    expect(SSR_STATE.currentSpreadPages).toEqual([]);
+    // Outer Object.freeze is shallow; the plan explicitly deep-freezes the
+    // nested array. Regression here would break the frozen-sentinel intent.
+    expect(Object.isFrozen(SSR_STATE.currentSpreadPages)).toBe(true);
+  });
+
+  it('loading state — reflects last-known reducer state (initial: empty array)', () => {
+    // Uses controllable init so status stays 'loading' — otherwise auto-init
+    // settles via microtask before the assertion runs.
+    const { source } = makeControllableSource();
+    const { result } = renderHook(() => useFlipbook(), { wrapper: wrap(source) });
+    expect(result.current.status).toBe('loading');
+    // pageCount=0 → currentSpreadPages=[]. Matches the "last-known reducer
+    // state" convention: at initial mount there's no committed spread yet.
+    expect(result.current.state.currentSpreadPages).toEqual([]);
+  });
+
+  it('single mode + 4-page source: on page 3, currentSpreadPages=[3]', async () => {
+    const source = makeSource({ pageCount: 4 });
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      <FlipbookProvider source={source} viewMode="single">{children}</FlipbookProvider>;
+    const { result } = renderHook(() => useFlipbook(), { wrapper });
+    await vi.waitFor(() => {
+      expect(result.current.state.totalPages).toBe(4);
+    });
+    act(() => { result.current.actions.goToPage(3); });
+    await vi.waitFor(() => {
+      expect(result.current.state.currentSpreadPages).toEqual([3]);
+    });
+  });
+
+  it('cover spread (dual-cover, spread 0): currentSpreadPages=[1]', async () => {
+    const source = makeSource({ pageCount: 6 });
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      <FlipbookProvider source={source} viewMode="dual-cover">{children}</FlipbookProvider>;
+    const { result } = renderHook(() => useFlipbook(), { wrapper });
+    // Initial mount lands on spread 0 (cover). No navigation needed.
+    await vi.waitFor(() => {
+      expect(result.current.state.totalPages).toBe(6);
+    });
+    expect(result.current.state.currentSpreadPages).toEqual([1]);
+  });
+
+  it('interior dual-cover spread exposes both pages in visual order', async () => {
+    const source = makeSource({ pageCount: 6 });
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      <FlipbookProvider source={source} viewMode="dual-cover">{children}</FlipbookProvider>;
+    const { result } = renderHook(() => useFlipbook(), { wrapper });
+    await vi.waitFor(() => {
+      expect(result.current.state.totalPages).toBe(6);
+    });
+    act(() => { result.current.actions.goToPage(2); });
+    await vi.waitFor(() => {
+      expect(result.current.state.currentSpreadPages).toEqual([2, 3]);
+    });
+  });
+
+  it('last-solo spread (6-page dual-cover, spread 3): currentSpreadPages=[6]', async () => {
+    // Parity: EVEN page counts yield a last-solo spread in LTR dual-cover.
+    // 6 pages: cover [null,0] + [1,2] + [3,4] + [5,null] → last spread is [6].
+    const source = makeSource({ pageCount: 6 });
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      <FlipbookProvider source={source} viewMode="dual-cover">{children}</FlipbookProvider>;
+    const { result } = renderHook(() => useFlipbook(), { wrapper });
+    await vi.waitFor(() => {
+      expect(result.current.state.totalPages).toBe(6);
+    });
+    act(() => { result.current.actions.goToPage(6); });
+    await vi.waitFor(() => {
+      expect(result.current.state.currentSpreadPages).toEqual([6]);
+    });
+  });
+
+  it('identity stays stable across unrelated state changes (setTheme)', async () => {
+    const source = makeSource({ pageCount: 6 });
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      <FlipbookProvider source={source} viewMode="dual-cover">{children}</FlipbookProvider>;
+    const { result } = renderHook(() => useFlipbook(), { wrapper });
+    await vi.waitFor(() => {
+      expect(result.current.state.totalPages).toBe(6);
+    });
+    act(() => { result.current.actions.goToPage(2); });
+    await vi.waitFor(() => {
+      expect(result.current.state.currentSpreadPages).toEqual([2, 3]);
+    });
+    const before = result.current.state.currentSpreadPages;
+    act(() => { result.current.actions.setTheme('dark'); });
+    // Object.is === true proves the tight-dep memo held the reference —
+    // if a future refactor inlines the array back into the broader
+    // hookState memo, this assertion fails.
+    expect(Object.is(result.current.state.currentSpreadPages, before)).toBe(true);
   });
 });

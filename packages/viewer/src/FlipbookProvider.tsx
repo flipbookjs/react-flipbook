@@ -936,6 +936,20 @@ export function FlipbookProvider({
   }), [canFullScreen, canDownload]);   // narrow deps — pageToSpreadIndex reads live state via refs
 
   // ---- Curated hook state (the `state` field of FlipbookSnapshot / FlipbookHook) ----
+  // Tight-dep memo: identity stable across unrelated state changes (zoom,
+  // theme, printing, etc.). Consumer selectors reading
+  // `s.state.currentSpreadPages` with default Object.is (per the selector
+  // contract at useFlipbook.ts:261-268) re-render only when the current
+  // spread actually changes, not on unrelated updates.
+  const currentSpreadPages = useMemo<readonly number[]>(() => {
+    const currentSpread = spreads[state.currentSpreadIndex];
+    if (!currentSpread || state.pageCount === 0) return [];
+    const out: number[] = [];
+    if (currentSpread.left != null) out.push(currentSpread.left + 1);
+    if (currentSpread.right != null) out.push(currentSpread.right + 1);
+    return out;
+  }, [spreads, state.currentSpreadIndex, state.pageCount]);
+
   const hookState = useMemo<FlipbookHookState>(() => {
     const currentSpread = spreads[state.currentSpreadIndex];
     const anchorPage0 = currentSpread
@@ -943,6 +957,7 @@ export function FlipbookProvider({
       : 0;
     return {
       pageNumber: state.pageCount > 0 ? anchorPage0 + 1 : 1,
+      currentSpreadPages,
       totalPages: state.pageCount,
       spreadIndex: state.currentSpreadIndex,
       spreadCount: state.spreadCount,
@@ -960,6 +975,7 @@ export function FlipbookProvider({
       thumbnailsOpen: state.thumbnailsOpen,
     };
   }, [
+    currentSpreadPages,
     spreads, state.currentSpreadIndex, state.pageCount, state.spreadCount,
     state.viewMode, state.resolvedViewMode, state.zoomMode, state.customScale,
     effectiveScale, isOverflowing,

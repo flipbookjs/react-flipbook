@@ -116,7 +116,8 @@ describe('public API exports', () => {
     // the actual field set. Annotation-only — these don't need assertions, but
     // they DO need to type-check.
     const _hookState: FlipbookHookState = {
-      pageNumber: 1, totalPages: 0,
+      pageNumber: 1, currentSpreadPages: [],
+      totalPages: 0,
       spreadIndex: 0, spreadCount: 0,
       viewMode: 'auto', resolvedViewMode: 'single',
       zoomMode: 'fit-page', customScale: 1, effectiveScale: 1,

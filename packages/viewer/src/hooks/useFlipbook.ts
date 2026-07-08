@@ -16,6 +16,24 @@ export { shallowEqual } from './shallowEqual';
  *  the rationale. */
 export interface FlipbookHookState {
   pageNumber: number;
+  /**
+   * 1-indexed page numbers of the current spread, in visual left-to-right order.
+   * Length 1 in `viewMode: 'single'` and for cover / last-solo spreads;
+   * length 2 for interior dual-cover spreads. Empty array before the source's
+   * first ready commit (SSR + initial loading).
+   *
+   * ⚠️ Like every other field on this interface, this reflects the LAST KNOWN
+   * reducer state (see the `useFlipbook` JSDoc §"State fields" caveat
+   * below). During a source transition — `<Flipbook source>` changes and
+   * `fb.status` flips to `'loading'` — this array still reflects the PREVIOUS
+   * source until the next SOURCE_CHANGED commit. Consumers building UI
+   * affordances that depend on the current source should guard on
+   * `fb.status === 'ready'`.
+   *
+   * Consumers use this for spread-aware UI affordances (e.g., highlighting
+   * both pages of the current spread in a thumbnail panel).
+   */
+  currentSpreadPages: readonly number[];
   totalPages: number;
   spreadIndex: number;
   spreadCount: number;
@@ -195,7 +213,8 @@ export interface FlipbookSnapshot {
  *  loading client-side) uses the LIVE snapshot's state (which carries the
  *  user's initialTheme) — see useFlipbook() impl below. */
 export const SSR_STATE: FlipbookHookState = Object.freeze({
-  pageNumber: 1, totalPages: 0, spreadIndex: 0, spreadCount: 0,
+  pageNumber: 1, currentSpreadPages: Object.freeze([]) as readonly number[],
+  totalPages: 0, spreadIndex: 0, spreadCount: 0,
   viewMode: 'auto', resolvedViewMode: 'single',
   zoomMode: 'fit-page', customScale: 1, effectiveScale: 1, isOverflowing: false,
   isFullScreen: false, theme: 'light', interactionMode: 'select', isPrinting: false,
