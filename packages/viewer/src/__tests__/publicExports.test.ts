@@ -76,7 +76,20 @@ describe('public API exports', () => {
     const link: LinkAnnotation = { rect: [0, 0, 1, 1] };
     const outline: OutlineItem = { title: 't', pageIndex: 0 };
     const opts: PdfjsSourceOptions = {};
+    // v3.3.0 additions — positive assertion that every new field is assignable
+    // at the type level. Catches typos in field names that empty-literal
+    // assertions would miss.
+    const optsWithRuntimeAssets: PdfjsSourceOptions = {
+      wasmUrl: 'https://cdn.example.com/pdfjs/wasm/',
+      standardFontDataUrl: 'https://cdn.example.com/pdfjs/standard_fonts/',
+      cMapUrl: 'https://cdn.example.com/pdfjs/cmaps/',
+      cMapPacked: true,
+      iccUrl: 'https://cdn.example.com/pdfjs/iccs/',
+    };
     const props: FlipbookProps = {};
+    const propsWithPdfjsOptions: FlipbookProps = {
+      pdfjsOptions: { wasmUrl: 'https://cdn.example.com/pdfjs/wasm/' },
+    };
     const propsWithCurl: FlipbookProps = { enablePageCurl: true };
     // DefaultScale type — accepts strings, numbers, and SpecialZoomLevel enum members.
     const scaleString: DefaultScale = 'fit-page';
@@ -100,7 +113,10 @@ describe('public API exports', () => {
     expect(link.rect).toHaveLength(4);
     expect(outline.title).toBe('t');
     expect(opts).toEqual({});
+    expect(optsWithRuntimeAssets.wasmUrl).toBe('https://cdn.example.com/pdfjs/wasm/');
+    expect(optsWithRuntimeAssets.cMapPacked).toBe(true);
     expect(props).toEqual({});
+    expect(propsWithPdfjsOptions.pdfjsOptions?.wasmUrl).toBe('https://cdn.example.com/pdfjs/wasm/');
     expect(propsWithCurl.enablePageCurl).toBe(true);
     expect(scaleString).toBe('fit-page');
     expect(scaleNumber).toBe(1.5);

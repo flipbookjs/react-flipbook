@@ -6,9 +6,13 @@ afterEach(cleanup);
 import { Flipbook } from '../Flipbook';
 import type { PageSource } from '../types/PageSource';
 
-// Mock PdfjsSource so the `url` prop path doesn't try to load real PDFs
+// Mock PdfjsSource so the `url` prop path doesn't try to load real PDFs.
+// Use a regular `function` (not arrow) so `new PdfjsSource(...)` works —
+// arrow functions lack the [[Construct]] internal slot.
 vi.mock('../adapters/PdfjsSource', () => ({
-  PdfjsSource: vi.fn().mockImplementation(() => createMockSource()),
+  PdfjsSource: vi.fn(function (this: any) {
+    Object.assign(this, createMockSource());
+  }),
 }));
 
 vi.mock('../adapters/configurePdfWorker', () => ({
@@ -125,5 +129,17 @@ describe('Flipbook', () => {
     await waitFor(() => {
       expect(screen.getByTestId('fbjs-ready')).toBeTruthy();
     });
+  });
+
+  it('forwards the `pdfjsOptions` prop to the internal PdfjsSource constructor', async () => {
+    const { PdfjsSource } = await import('../adapters/PdfjsSource');
+    const pdfjsSourceMock = vi.mocked(PdfjsSource);
+    const callCountBefore = pdfjsSourceMock.mock.calls.length;
+
+    const opts = { wasmUrl: 'https://cdn.example.com/pdfjs/wasm/' };
+    render(<Flipbook url="/x.pdf" pdfjsOptions={opts} />);
+
+    expect(pdfjsSourceMock.mock.calls.length).toBe(callCountBefore + 1);
+    expect(pdfjsSourceMock.mock.calls[callCountBefore]).toEqual(['/x.pdf', opts]);
   });
 });

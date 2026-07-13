@@ -3,6 +3,19 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { PageSource } from '../types/PageSource';
 import { configurePdfWorker } from './configurePdfWorker';
 
+/**
+ * Runtime asset URL defaults (`wasmUrl`, `standardFontDataUrl`, `cMapUrl`,
+ * `iccUrl`) point at jsDelivr, version-pinned to `pdfjs.version` at runtime
+ * so the consumer's installed `pdfjs-dist` peer stays authoritative. jsDelivr
+ * mirrors npm; every published `pdfjs-dist` version is available and served
+ * with `Cache-Control: immutable` + `Access-Control-Allow-Origin: *`.
+ * Consumers who cannot fetch from a public CDN (strict CSP, air-gapped,
+ * privacy-sensitive) MUST override each URL field, typically self-hosting
+ * copies from their `node_modules/pdfjs-dist/{wasm,cmaps,standard_fonts,iccs}/`
+ * peer install.
+ */
+const PDFJS_CDN_BASE = 'https://cdn.jsdelivr.net/npm/pdfjs-dist';
+
 export interface PdfjsSourceOptions {
   /** Custom worker URL. If omitted, uses bundled asset URL (see configurePdfWorker). */
   workerSrc?: string;
@@ -12,6 +25,44 @@ export interface PdfjsSourceOptions {
   httpHeaders?: Record<string, string>;
   /** Whether to send credentials with the request. */
   withCredentials?: boolean;
+  /**
+   * URL where PDF.js runtime wasm binaries live (openjpeg.wasm for JPEG2000,
+   * jbig2.wasm for JBIG2, qcms_bg.wasm for ICC color mgmt). If omitted,
+   * defaults to jsDelivr `pdfjs-dist/wasm/` pinned to the consumer's runtime
+   * `pdfjs.version` (see file-level CDN trust-surface note). MUST end with a
+   * trailing slash. PDFs without JPX/JBIG2/ICC images do NOT fetch this —
+   * PDF.js loads it lazily on first use.
+   */
+  wasmUrl?: string;
+  /**
+   * URL where PDF.js standard-14 font data (`.pfb`) lives. Required for correct
+   * glyph rendering of Times, Helvetica, Courier, Symbol, ZapfDingbats when
+   * the PDF doesn't embed these fonts. If omitted, defaults to jsDelivr
+   * `pdfjs-dist/standard_fonts/` pinned to the consumer's runtime `pdfjs.version`.
+   * MUST end with a trailing slash.
+   */
+  standardFontDataUrl?: string;
+  /**
+   * URL where PDF.js Adobe CMap data (`.bcmap`) lives. Required for correct
+   * rendering of non-Latin scripts (CJK, Arabic, Hebrew). If omitted, defaults
+   * to jsDelivr `pdfjs-dist/cmaps/` pinned to the consumer's runtime
+   * `pdfjs.version`. MUST end with a trailing slash.
+   */
+  cMapUrl?: string;
+  /**
+   * Whether the CMaps at `cMapUrl` are binary-packed (`.bcmap`). pdfjs-dist
+   * ships packed CMaps (and jsDelivr mirrors them as such), so the default is
+   * `true`. Only set to `false` if serving text-format CMaps from a custom
+   * `cMapUrl`.
+   */
+  cMapPacked?: boolean;
+  /**
+   * URL where PDF.js ICC color profile data lives. Required for correct
+   * rendering of ICC color-managed images. If omitted, defaults to jsDelivr
+   * `pdfjs-dist/iccs/` pinned to the consumer's runtime `pdfjs.version`.
+   * MUST end with a trailing slash.
+   */
+  iccUrl?: string;
 }
 
 export class PdfjsSource implements PageSource {
@@ -39,6 +90,15 @@ export class PdfjsSource implements PageSource {
       password: this.options.password,
       httpHeaders: this.options.httpHeaders,
       withCredentials: this.options.withCredentials,
+      // Runtime asset URLs — defaults point at jsDelivr, pinned to the
+      // consumer's runtime pdfjs.version. See file-level trust-surface note
+      // for override guidance (offline/CSP consumers self-host).
+      wasmUrl: this.options.wasmUrl ?? `${PDFJS_CDN_BASE}@${pdfjs.version}/wasm/`,
+      standardFontDataUrl: this.options.standardFontDataUrl
+        ?? `${PDFJS_CDN_BASE}@${pdfjs.version}/standard_fonts/`,
+      cMapUrl: this.options.cMapUrl ?? `${PDFJS_CDN_BASE}@${pdfjs.version}/cmaps/`,
+      cMapPacked: this.options.cMapPacked ?? true,
+      iccUrl: this.options.iccUrl ?? `${PDFJS_CDN_BASE}@${pdfjs.version}/iccs/`,
     });
 
     const doc = await loadingTask.promise;

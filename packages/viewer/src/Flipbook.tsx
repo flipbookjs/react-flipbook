@@ -3,7 +3,7 @@
 import { isValidElement, type ReactNode, useMemo } from 'react';
 import type { PageSource } from './types/PageSource';
 import type { DefaultScale } from './zoom/types';
-import { PdfjsSource } from './adapters/PdfjsSource';
+import { PdfjsSource, type PdfjsSourceOptions } from './adapters/PdfjsSource';
 import { FlipbookProvider } from './FlipbookProvider';
 import { Toolbar } from './toolbar/Toolbar';
 import { ThumbnailPanel } from './thumbnails/ThumbnailPanel';
@@ -64,6 +64,22 @@ function isSlotObject(value: unknown): value is { top?: ReactNode; bottom?: Reac
 interface FlipbookCommonProps {
   url?: string;
   source?: PageSource;
+  /**
+   * Options forwarded to the internally-constructed `PdfjsSource` when using
+   * the `url` prop. When `source` is also provided the internal `PdfjsSource`
+   * is constructed but unused (existing behavior of the `source ?? internalSource`
+   * fallback below) — consumers passing both `url` and `source` should just
+   * pass options directly to their `PdfjsSource` constructor.
+   *
+   * Common use: override `wasmUrl` / `cMapUrl` / etc. to self-host PDF.js's
+   * runtime assets (offline, strict CSP, air-gapped) instead of the default
+   * jsDelivr CDN — see `PdfjsSourceOptions` docs for each URL's semantics.
+   *
+   * ⚠️ Memoize this object (`useMemo`) if you construct it inline — a fresh
+   * object literal each render triggers `PdfjsSource` recreation (dispose +
+   * re-init) on every render, which reloads the document.
+   */
+  pdfjsOptions?: PdfjsSourceOptions;
   viewMode?: 'single' | 'dual-cover' | 'auto';
   initialPage?: number;
   renderError?: (error: Error) => ReactNode;
@@ -264,6 +280,7 @@ export type FlipbookProps =
 export function Flipbook({
   url,
   source,
+  pdfjsOptions,
   viewMode,
   initialPage = 0,
   renderError,
@@ -307,8 +324,8 @@ export function Flipbook({
   }
 
   const internalSource = useMemo(
-    () => (url ? new PdfjsSource(url) : null),
-    [url],
+    () => (url ? new PdfjsSource(url, pdfjsOptions) : null),
+    [url, pdfjsOptions],
   );
   const effectiveSource = source ?? internalSource;
 

@@ -28,6 +28,8 @@ vi.mock('pdfjs-dist', () => {
       promise: Promise.resolve(mockDoc),
     })),
     GlobalWorkerOptions: { workerSrc: '' },
+    // Runtime CDN-URL defaults in PdfjsSource.init() interpolate `pdfjs.version`.
+    version: '5.6.205',
     _mockDoc: mockDoc,
     _mockPage: mockPage,
     _mockRenderTask: mockRenderTask,
@@ -163,5 +165,53 @@ describe('PdfjsSource', () => {
     // Re-init should succeed (simulates Strict Mode remount)
     await source.init();
     expect(source.getPageCount()).toBe(3);
+  });
+});
+
+describe('PdfjsSource — runtime asset URL defaults', () => {
+  // Inspects the existing module-level `getDocument` mock. `callCountBefore`
+  // snapshots make each test independent of how many times earlier tests
+  // called `getDocument` in the same file — no shared mockReset needed
+  // (a reset would clobber the numPages: 3 shape the other tests depend on).
+
+  it('passes jsDelivr CDN URL defaults pinned to pdfjs.version when no overrides are provided', async () => {
+    const pdfjs = await import('pdfjs-dist');
+    const getDocumentMock = vi.mocked(pdfjs.getDocument);
+    const callCountBefore = getDocumentMock.mock.calls.length;
+
+    const src = new PdfjsSource('https://example.com/doc.pdf');
+    await src.init();
+
+    expect(getDocumentMock.mock.calls.length).toBe(callCountBefore + 1);
+    const opts = getDocumentMock.mock.calls[callCountBefore][0] as any;
+    // Defaults follow the shape `https://cdn.jsdelivr.net/npm/pdfjs-dist@<version>/<subdir>/`.
+    const base = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${(pdfjs as any).version}`;
+    expect(opts.wasmUrl).toBe(`${base}/wasm/`);
+    expect(opts.standardFontDataUrl).toBe(`${base}/standard_fonts/`);
+    expect(opts.cMapUrl).toBe(`${base}/cmaps/`);
+    expect(opts.cMapPacked).toBe(true);
+    expect(opts.iccUrl).toBe(`${base}/iccs/`);
+  });
+
+  it('honors consumer-provided overrides for each asset URL', async () => {
+    const pdfjs = await import('pdfjs-dist');
+    const getDocumentMock = vi.mocked(pdfjs.getDocument);
+    const callCountBefore = getDocumentMock.mock.calls.length;
+
+    const src = new PdfjsSource('https://example.com/doc.pdf', {
+      wasmUrl: 'https://cdn.example.com/pdfjs/wasm/',
+      standardFontDataUrl: 'https://cdn.example.com/pdfjs/fonts/',
+      cMapUrl: 'https://cdn.example.com/pdfjs/cmaps/',
+      cMapPacked: false,
+      iccUrl: 'https://cdn.example.com/pdfjs/iccs/',
+    });
+    await src.init();
+
+    const opts = getDocumentMock.mock.calls[callCountBefore][0] as any;
+    expect(opts.wasmUrl).toBe('https://cdn.example.com/pdfjs/wasm/');
+    expect(opts.standardFontDataUrl).toBe('https://cdn.example.com/pdfjs/fonts/');
+    expect(opts.cMapUrl).toBe('https://cdn.example.com/pdfjs/cmaps/');
+    expect(opts.cMapPacked).toBe(false);
+    expect(opts.iccUrl).toBe('https://cdn.example.com/pdfjs/iccs/');
   });
 });
