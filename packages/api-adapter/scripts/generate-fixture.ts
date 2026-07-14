@@ -75,30 +75,69 @@ interface PdfjsAnnotation {
   dest?: unknown;
 }
 
-function convertLinkAnnotation(
-  ann: PdfjsAnnotation,
-  pageHeight: number,
-): Record<string, unknown> | null {
-  if (ann.subtype !== 'Link') return null;
-  const [x1, y1, x2, y2] = ann.rect;
-  // Flip y: pdf.js uses bottom-left origin; spec uses top-left.
-  const rectCss: [number, number, number, number] = [
-    x1,
-    pageHeight - y2,
-    x2,
-    pageHeight - y1,
-  ];
-  if (ann.url) {
-    return { rect: rectCss, url: ann.url };
-  }
-  if (ann.dest != null) {
-    // Internal dest. pdf.js destinations are complex; for the fixture we
-    // just emit a placeholder destPage. Real bake step (Step 7) will
-    // resolve dest → pageIndex via the PDF's named-destination table.
-    return { rect: rectCss, destPage: 0 };
-  }
-  return null;
+// Sidecar-side scheme sanitizer. Bake-time doesn't know the future
+// consumer's `additionalLinkSchemes` config, so the baker restricts to the
+// runtime DEFAULT allowlist. Consumers who need custom schemes at their
+// PdfjsSource path still get them; the pre-baked path is default-only by
+// design. Baking irrevocably deletes data, so being restrictive at bake
+// keeps unsafe URLs out of persistent storage.
+const BAKER_ALLOWED_SCHEMES = new Set(['http', 'https', 'mailto', 'tel']);
+const FORBIDDEN_SCHEMES = new Set(['javascript', 'data', 'vbscript', 'file']);
+
+function isSafeBakerUrl(url: string): boolean {
+  const m = url.trim().match(/^([a-z][a-z0-9+.-]*):/i);
+  const scheme = m?.[1]?.toLowerCase();
+  if (!scheme) return false;
+  if (FORBIDDEN_SCHEMES.has(scheme)) return false;
+  return BAKER_ALLOWED_SCHEMES.has(scheme);
 }
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+async function convertLinkAnnotation(
+  ann: PdfjsAnnotation,
+  page: any,
+  doc: any,
+): Promise<Record<string, unknown> | null> {
+  // Payload-shape filter — keep sidecar sanitizer aligned with runtime.
+  if (ann.subtype !== 'Link') return null;
+  if ((ann as any).actions) return null;
+  if ((ann as any).action != null) return null;
+  if ((ann as any).attachment) return null;
+  if ((ann as any).setOCGState) return null;
+  if ((ann as any).resetForm) return null;
+
+  const viewport = page.getViewport({ scale: 1.0 });
+  const raw = viewport.convertToViewportRectangle(ann.rect);
+  if (!Array.isArray(raw) || raw.length < 4) return null;
+  const [x1, y1, x2, y2] = raw;
+  if (![x1, y1, x2, y2].every(Number.isFinite)) return null;
+  const rect: [number, number, number, number] = [
+    Math.min(x1, x2), Math.min(y1, y2),
+    Math.max(x1, x2), Math.max(y1, y2),
+  ];
+  if (rect[2] <= rect[0] || rect[3] <= rect[1]) return null;
+
+  if (ann.url) {
+    const url = ann.url.trim();
+    if (!isSafeBakerUrl(url)) return null;
+    return { rect, url };
+  }
+  if ((ann as any).dest == null) return null;
+
+  try {
+    const dest = typeof (ann as any).dest === 'string'
+      ? await doc.getDestination((ann as any).dest)
+      : (ann as any).dest;
+    if (!Array.isArray(dest) || dest.length === 0) return null;
+    const destPage = await doc.getPageIndex(dest[0]);
+    if (typeof destPage !== 'number') return null;
+    return { rect, destPage };
+  } catch {
+    // Malformed dest, missing bookmark, or unresolvable dest — drop.
+    return null;
+  }
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 async function extractOutline(doc: any): Promise<Record<string, unknown>[]> {
@@ -216,9 +255,11 @@ async function main(): Promise<void> {
     // links.json — per spec §6.2
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const annotations = (await page.getAnnotations()) as PdfjsAnnotation[];
-    const links = annotations
-      .map((a) => convertLinkAnnotation(a, baseViewport.height))
-      .filter((x): x is Record<string, unknown> => x !== null);
+    const links = (
+      await Promise.all(
+        annotations.map((a) => convertLinkAnnotation(a, page, doc)),
+      )
+    ).filter((x): x is Record<string, unknown> => x !== null);
     writeFileSync(
       resolve(pageOutDir, 'links.json'),
       JSON.stringify({ links }, null, 2) + '\n',
