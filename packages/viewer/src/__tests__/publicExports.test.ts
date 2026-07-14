@@ -86,10 +86,17 @@ describe('public API exports', () => {
       cMapPacked: true,
       iccUrl: 'https://cdn.example.com/pdfjs/iccs/',
     };
+    // v3.4.0 additions on PdfjsSourceOptions
+    const optsWithLinkExtension: PdfjsSourceOptions = {
+      linkDiagnostics: true,
+      additionalLinkSchemes: ['intranet', 'app'],
+    };
     const props: FlipbookProps = {};
     const propsWithPdfjsOptions: FlipbookProps = {
       pdfjsOptions: { wasmUrl: 'https://cdn.example.com/pdfjs/wasm/' },
     };
+    // v3.4.0 addition on FlipbookProps
+    const propsWithShowLinks: FlipbookProps = { showLinks: false };
     const propsWithCurl: FlipbookProps = { enablePageCurl: true };
     // DefaultScale type — accepts strings, numbers, and SpecialZoomLevel enum members.
     const scaleString: DefaultScale = 'fit-page';
@@ -115,8 +122,11 @@ describe('public API exports', () => {
     expect(opts).toEqual({});
     expect(optsWithRuntimeAssets.wasmUrl).toBe('https://cdn.example.com/pdfjs/wasm/');
     expect(optsWithRuntimeAssets.cMapPacked).toBe(true);
+    expect(optsWithLinkExtension.linkDiagnostics).toBe(true);
+    expect(optsWithLinkExtension.additionalLinkSchemes).toEqual(['intranet', 'app']);
     expect(props).toEqual({});
     expect(propsWithPdfjsOptions.pdfjsOptions?.wasmUrl).toBe('https://cdn.example.com/pdfjs/wasm/');
+    expect(propsWithShowLinks.showLinks).toBe(false);
     expect(propsWithCurl.enablePageCurl).toBe(true);
     expect(scaleString).toBe('fit-page');
     expect(scaleNumber).toBe(1.5);

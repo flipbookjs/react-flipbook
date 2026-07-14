@@ -31,11 +31,17 @@
 
 .fbjs-page {
   position: relative;
+  z-index: 0;  /* Establishes stacking context so inner z-indices don't
+                  compete with outer siblings like .fbjs-curl-overlay (z-index: 2).
+                  Without this, the link overlay (inner z-index: 3) would
+                  numerically win against curl during an active gesture. */
 }
 
 .fbjs-page-canvas {
   display: block;
   line-height: 0;
+  position: relative;  /* Required for z-index to take effect. */
+  z-index: 1;          /* Inner-stack anchor for the layer map above. */
 }
 
 .fbjs-page-loading {
@@ -174,4 +180,50 @@
   pointer-events: auto;
   /* During an in-flight curl, claim all touch behavior — no native scroll/pinch/select. */
   touch-action: none;
+}
+
+/*
+  Inner-stack layer order inside .fbjs-page (see Step 6 outer/inner map):
+    z-index 1: .fbjs-page-canvas   — imperative pdfjs canvas
+    z-index 2: RESERVED             — future text-selection layer
+    z-index 3: .fbjs-link-overlay  — this file
+    (natural stacking above: .fbjs-page-loading, .fbjs-page-error)
+*/
+.fbjs-link-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.fbjs-link {
+  position: absolute;
+  display: block;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+  color: inherit;
+  font: inherit;
+  text-decoration: none;
+}
+
+.fbjs-link:focus-visible {
+  outline: 2px solid var(--fbjs-focus, #0066ff);
+  outline-offset: 2px;
+}
+
+/*
+  Windows high-contrast / forced-colors: keep hitboxes visible (thin
+  outline of the rect) rather than let the system repaint them as full
+  button chrome, which would cover the underlying canvas text.
+*/
+@media (forced-colors: active) {
+  .fbjs-link {
+    background: transparent;
+    border: 1px solid transparent;
+    outline: 1px solid CanvasText;
+    outline-offset: -1px;
+  }
 }

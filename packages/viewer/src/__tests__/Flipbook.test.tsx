@@ -4,7 +4,7 @@ import { render, screen, waitFor, cleanup } from '@testing-library/react';
 
 afterEach(cleanup);
 import { Flipbook } from '../Flipbook';
-import type { PageSource } from '../types/PageSource';
+import type { PageSource, LinkAnnotation } from '../types/PageSource';
 
 // Mock PdfjsSource so the `url` prop path doesn't try to load real PDFs.
 // Use a regular `function` (not arrow) so `new PdfjsSource(...)` works —
@@ -141,5 +141,64 @@ describe('Flipbook', () => {
 
     expect(pdfjsSourceMock.mock.calls.length).toBe(callCountBefore + 1);
     expect(pdfjsSourceMock.mock.calls[callCountBefore]).toEqual(['/x.pdf', opts]);
+  });
+
+  it('renders LinkOverlay by default when source implements getLinks', async () => {
+    const source = createMockSource({
+      getLinks: vi.fn((): Promise<LinkAnnotation[]> => Promise.resolve([
+        { rect: [0, 0, 10, 10], url: 'https://a.example' },
+      ])),
+    });
+    const { container } = render(<Flipbook source={source} />);
+    await waitFor(() => expect(screen.getByTestId('fbjs-ready')).toBeTruthy());
+    await waitFor(() => {
+      expect(container.querySelector('.fbjs-link-overlay')).not.toBeNull();
+    });
+    expect(source.getLinks).toHaveBeenCalledWith(expect.any(Number), expect.any(AbortSignal));
+  });
+
+  it('internal link click updates the current page', async () => {
+    const source = createMockSource({
+      getPageCount: vi.fn(() => 10),
+      // Return the link ONLY for page 0 — overscan mounts pages 1 and 2
+      // simultaneously, and they must NOT also produce fbjs-link elements
+      // (which would break getByTestId's single-match assumption).
+      getLinks: vi.fn((idx: number): Promise<LinkAnnotation[]> => Promise.resolve(
+        idx === 0
+          ? [{ rect: [0, 0, 10, 10], destPage: 4 }]  // → goToPage(5)
+          : [],
+      )),
+    });
+    const { container } = render(<Flipbook source={source} />);
+    await waitFor(() => expect(screen.getByTestId('fbjs-ready')).toBeTruthy());
+
+    // Scope to the currently-visible spread — the ONE .fbjs-spread without
+    // aria-hidden="true". Even if a stray fbjs-link appears elsewhere, we
+    // click the correct one.
+    const findVisibleSpread = () => {
+      const spreads = container.querySelectorAll('.fbjs-spread');
+      return Array.from(spreads).find(el => !el.hasAttribute('aria-hidden'));
+    };
+    await waitFor(() => {
+      const vs = findVisibleSpread();
+      expect(vs?.querySelector('[data-testid="fbjs-link"]')).not.toBeNull();
+    });
+    (findVisibleSpread()!.querySelector('[data-testid="fbjs-link"]') as HTMLButtonElement).click();
+
+    // After the click, the visible spread should contain page 5 (1-indexed).
+    await waitFor(() => {
+      const vs = findVisibleSpread();
+      expect(vs).toBeTruthy();
+      expect(vs!.querySelector('[aria-label="Page 5"]')).not.toBeNull();
+    });
+  });
+
+  it('does not render LinkOverlay when showLinks={false}', async () => {
+    const source = createMockSource({
+      getLinks: vi.fn((): Promise<LinkAnnotation[]> => Promise.resolve([{ rect: [0, 0, 10, 10], url: 'https://a.example' }])),
+    });
+    const { container } = render(<Flipbook source={source} showLinks={false} />);
+    await waitFor(() => expect(screen.getByTestId('fbjs-ready')).toBeTruthy());
+    expect(container.querySelector('.fbjs-link-overlay')).toBeNull();
   });
 });

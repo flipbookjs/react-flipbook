@@ -116,6 +116,9 @@ function sanitizePrintMaxPages(raw: number): number {
 
 interface FlipbookProviderProps {
   source: PageSource;
+  /** Whether to render clickable link overlays on each page. Default true.
+   *  Threaded from <Flipbook showLinks> → FlipbookContext → PageRenderer. */
+  showLinks?: boolean;
   viewMode?: 'single' | 'dual-cover' | 'auto';
   initialPage?: number;
   renderError?: (error: Error) => ReactNode;
@@ -233,6 +236,7 @@ interface FlipbookProviderProps {
 
 export function FlipbookProvider({
   source,
+  showLinks = true,
   viewMode,
   initialPage,
   renderError,
@@ -530,10 +534,12 @@ export function FlipbookProvider({
     () => ({
       state, dispatch, source, spreads, effectiveScale, isOverflowing, registerCurlWheelHandler,
       sourceStatus, sourceError,
+      showLinks,
     }),
     [
       state, dispatch, source, spreads, effectiveScale, isOverflowing, registerCurlWheelHandler,
       sourceStatus, sourceError,
+      showLinks,
     ],
   );
 

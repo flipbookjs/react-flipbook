@@ -27,6 +27,10 @@ export interface FlipbookContextValue {
   /** Populated when sourceStatus === 'error'; null otherwise. Mirrors
    *  `usePageSource.SourceState.error`. */
   sourceError: Error | null;
+  /** Whether to render clickable link overlays. Threaded from
+   *  <Flipbook showLinks> → FlipbookProvider → here → PageRenderer.
+   *  Default true. Consumers opt out with <Flipbook showLinks={false}>. */
+  showLinks: boolean;
 }
 
 export const FlipbookContext = createContext<FlipbookContextValue | null>(null);

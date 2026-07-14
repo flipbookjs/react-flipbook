@@ -106,7 +106,7 @@ describe('SpreadRenderer', () => {
     });
 
     await waitFor(() => {
-      const pages = screen.getByTestId('fbjs-ready').querySelectorAll('[role="img"]');
+      const pages = screen.getByTestId('fbjs-ready').querySelectorAll('.fbjs-page');
       expect(pages.length).toBeGreaterThanOrEqual(1);
     });
   });
@@ -164,11 +164,11 @@ describe('SpreadRenderer', () => {
     const slots = currentSpread!.querySelectorAll('.fbjs-slot');
     expect(slots.length).toBe(2);
 
-    const leftSlotPages = slots[0].querySelectorAll('[role="img"]');
+    const leftSlotPages = slots[0].querySelectorAll('.fbjs-page');
     expect(leftSlotPages.length).toBe(0);
 
     await waitFor(() => {
-      const rightSlotPages = slots[1].querySelectorAll('[role="img"]');
+      const rightSlotPages = slots[1].querySelectorAll('.fbjs-page');
       expect(rightSlotPages.length).toBe(1);
     });
   });

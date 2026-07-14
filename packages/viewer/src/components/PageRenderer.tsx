@@ -1,6 +1,9 @@
-import { useRef, useEffect, useState, useContext } from 'react';
+import { useRef, useEffect, useState, useContext, useCallback } from 'react';
 import type { PageSource } from '../types/PageSource';
 import { PageRegistryWriteContext } from '../core/PageRegistry';
+import { useFlipbookContext } from '../core/FlipbookContext';
+import { useFlipbookActions } from '../hooks/useFlipbook';
+import { LinkOverlay } from './LinkOverlay';
 
 interface PageRendererProps {
   source: PageSource;
@@ -14,6 +17,14 @@ export function PageRenderer({ source, pageIndex, scale }: PageRendererProps) {
   const registry = useContext(PageRegistryWriteContext);
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState<Error | null>(null);
+  const { showLinks } = useFlipbookContext();
+  const { goToPage } = useFlipbookActions();
+  // Memoize so LinkOverlay's 200 buttons don't churn their onClick handlers
+  // on every parent render.
+  const handleInternalLink = useCallback(
+    (destPage: number) => goToPage(destPage + 1),  // goToPage is 1-indexed
+    [goToPage],
+  );
 
   useEffect(() => {
     const canvasHost = canvasHostRef.current;
@@ -95,11 +106,19 @@ export function PageRenderer({ source, pageIndex, scale }: PageRendererProps) {
     <div
       ref={pageDivRef}
       className="fbjs-page"
-      role="img"
+      role="group"
       aria-label={`Page ${pageIndex + 1}`}
     >
       {/* Imperative canvas zone — React never reconciles this div's children */}
       <div ref={canvasHostRef} className="fbjs-page-canvas" />
+
+      {/* Interactive link hit targets — no-op when source doesn't implement getLinks OR state !== 'ready' */}
+      {showLinks && state === 'ready' && (
+        <LinkOverlay
+          source={source} pageIndex={pageIndex} scale={scale}
+          onInternalLinkClick={handleInternalLink}
+        />
+      )}
 
       {/* React-managed overlays */}
       {state === 'loading' && (

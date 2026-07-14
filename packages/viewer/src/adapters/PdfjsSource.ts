@@ -1,7 +1,33 @@
 import * as pdfjs from 'pdfjs-dist';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
-import type { PageSource } from '../types/PageSource';
+import type { PageSource, LinkAnnotation } from '../types/PageSource';
 import { configurePdfWorker } from './configurePdfWorker';
+
+const DEFAULT_ALLOWED_SCHEMES = new Set(['http', 'https', 'mailto', 'tel']);
+// Fence: consumers CANNOT re-enable these via additionalLinkSchemes.
+const FORBIDDEN_SCHEMES = new Set(['javascript', 'data', 'vbscript', 'file']);
+// RFC 3986 §3.1: scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
+const SCHEME_CHARS = /^[a-z0-9+.-]+$/i;
+const MAX_LINKS_PER_PAGE = 1000;
+
+function extractScheme(url: string): string | null {
+  const m = url.match(/^([a-z][a-z0-9+.-]*):/i);
+  return m ? m[1].toLowerCase() : null;
+}
+
+function sanitizeAdditionalSchemes(
+  additional: readonly string[] | undefined,
+): Set<string> {
+  if (!additional?.length) return DEFAULT_ALLOWED_SCHEMES;
+  const merged = new Set(DEFAULT_ALLOWED_SCHEMES);
+  for (const raw of additional) {
+    const s = raw.toLowerCase().trim();
+    if (!SCHEME_CHARS.test(s)) continue;       // reject regex metachars, etc.
+    if (FORBIDDEN_SCHEMES.has(s)) continue;    // fence
+    merged.add(s);
+  }
+  return merged;
+}
 
 /**
  * Runtime asset URL defaults (`wasmUrl`, `standardFontDataUrl`, `cMapUrl`,
@@ -63,6 +89,23 @@ export interface PdfjsSourceOptions {
    * MUST end with a trailing slash.
    */
   iccUrl?: string;
+  /**
+   * If true, `getLinks()` emits per-link console warnings for each dropped
+   * annotation (reason + rect). Off by default. Useful when a consumer
+   * reports that a specific link isn't clickable and you need to diagnose.
+   * Dev-mode ALWAYS emits a per-call summary warn when drops > 0; this
+   * option adds the per-link detail (in dev AND prod).
+   */
+  linkDiagnostics?: boolean;
+  /**
+   * Additional URL schemes accepted by `getLinks()`. Merged with the
+   * default allowlist (`https:`, `http:`, `mailto:`, `tel:`). Use for
+   * custom schemes (`intranet:`, `slack:`, `app:`, etc.) whose links your
+   * app knows how to handle. Schemes are matched case-insensitively.
+   * `javascript:`, `data:`, `vbscript:`, `file:` cannot be re-enabled
+   * this way — the internal denylist is checked after the allowlist.
+   */
+  additionalLinkSchemes?: readonly string[];
 }
 
 export class PdfjsSource implements PageSource {
@@ -145,6 +188,182 @@ export class PdfjsSource implements PageSource {
     if (typeof this.url === 'string') return this.url;
     if (this.url instanceof URL) return this.url.toString();
     return undefined;   // Uint8Array case
+  }
+
+  async getLinks(
+    index: number,
+    signal?: AbortSignal,
+  ): Promise<LinkAnnotation[]> {
+    if (!this.doc) throw new Error('PdfjsSource not initialized');
+    if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+
+    // Out-of-bounds guard: transient after fast source-swap where the parent's
+    // pageIndex still points at a page that doesn't exist in the new source.
+    // Return [] silently — pdfjs would otherwise throw "Requested page N does
+    // not exist" which our LinkOverlay's .catch swallows, but the dev warn
+    // added by the outer getAnnotations try/catch would fire noisily.
+    if (index < 0 || index >= this.pageSizes.length) return [];
+
+    // Relies on pdfjs's unbounded per-document page cache — renderPage will
+    // typically have called doc.getPage(index+1) a moment earlier, so this
+    // is O(1). Do NOT add a local page cache; duplicating pdfjs's is worse.
+    const page = await this.doc.getPage(index + 1);
+    if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+
+    const viewport = page.getViewport({ scale: 1.0 });
+
+    // Version-drift guard: `convertToViewportRectangle` was added to pdfjs's
+    // viewport helper before v5.0. If a consumer's peer-dep resolution ever
+    // lands a version missing this method, EVERY link on EVERY page drops
+    // silently as `bad-rect-shape` — an unhelpful diagnostic when the actual
+    // root cause is version incompatibility. Fail fast with a distinctive
+    // warn instead of masquerading as data corruption.
+    if (typeof viewport?.convertToViewportRectangle !== 'function') {
+      if (process.env.NODE_ENV !== 'production') {
+        console.warn(
+          `[flipbook] pdfjs viewport is missing convertToViewportRectangle() ` +
+          `— pdfjs peer version incompatible with @flipbookjs/react-viewer ` +
+          `(peer version: ${pdfjs.version}). No links rendered on page ${index}.`,
+        );
+      }
+      return [];
+    }
+
+    let anns: any[];
+    try {
+      anns = await page.getAnnotations();
+    } catch (err: any) {
+      if (err?.name === 'AbortError') throw err;
+      if (process.env.NODE_ENV !== 'production') {
+        console.warn(
+          `[flipbook] getAnnotations() failed for page ${index}: ${err?.message}. No links rendered.`,
+        );
+      }
+      return [];
+    }
+    if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+
+    const dropReasons: Record<string, number> = {};
+    const noteDrop = (reason: string, ann?: any) => {
+      dropReasons[reason] = (dropReasons[reason] ?? 0) + 1;
+      if (this.options.linkDiagnostics) {
+        console.warn(`[flipbook] link drop (${reason}) on page ${index}:`, ann);
+      }
+    };
+
+    // Payload allowlist matching pdfjs's actual annotation shape (verified
+    // against pdf.mjs:17595-17625). Reject any annotation carrying a
+    // recognized-dangerous payload field; accept only pure {url} or {dest}.
+    let linkAnns = anns.filter((a: any) => {
+      if (a.subtype !== 'Link') { noteDrop('non-Link', a); return false; }
+      if (a.actions) { noteDrop('actions-js-bundle', a); return false; }
+      if (a.action != null) {
+        // Reject ANY non-null action payload — string (Named), object, or
+        // otherwise. pdfjs primarily surfaces Named actions as strings but the
+        // security boundary must be shape-agnostic: an unexpected non-string
+        // shape must not slip past.
+        const label = typeof a.action === 'string' ? a.action : typeof a.action;
+        noteDrop(`action:${label}`, a); return false;
+      }
+      if (a.attachment) { noteDrop('attachment', a); return false; }
+      if (a.setOCGState) { noteDrop('setOCGState', a); return false; }
+      if (a.resetForm) { noteDrop('resetForm', a); return false; }
+      return true;
+    });
+
+    if (linkAnns.length > MAX_LINKS_PER_PAGE) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.warn(
+          `[flipbook] page ${index} has ${linkAnns.length} links; capping at ${MAX_LINKS_PER_PAGE}.`,
+        );
+      }
+      linkAnns = linkAnns.slice(0, MAX_LINKS_PER_PAGE);
+    }
+
+    const allowedSchemes = sanitizeAdditionalSchemes(this.options.additionalLinkSchemes);
+    const converted = await Promise.all(
+      linkAnns.map((a: any) => this.convertLink(a, viewport, allowedSchemes, signal, noteDrop)),
+    );
+
+    const links = converted.filter((l): l is LinkAnnotation => l !== null);
+
+    if (process.env.NODE_ENV !== 'production') {
+      const totalDrops = Object.values(dropReasons).reduce((a, b) => a + b, 0);
+      if (totalDrops > 0) {
+        const summary = Object.entries(dropReasons)
+          .map(([r, n]) => `${n}×${r}`).join(', ');
+        console.warn(
+          `[flipbook] getLinks(page ${index}): ${totalDrops} annotation(s) dropped (${summary}). Set PdfjsSourceOptions.linkDiagnostics=true for per-link detail.`,
+        );
+      }
+    }
+
+    return links;
+  }
+
+  private async convertLink(
+    ann: any,
+    viewport: any,
+    allowedSchemes: Set<string>,
+    signal: AbortSignal | undefined,
+    noteDrop: (reason: string, ann?: any) => void,
+  ): Promise<LinkAnnotation | null> {
+    try {
+      const raw = viewport.convertToViewportRectangle(ann.rect);
+      if (!Array.isArray(raw) || raw.length < 4) {
+        noteDrop('bad-rect-shape', ann); return null;
+      }
+      const [x1, y1, x2, y2] = raw;
+      if (![x1, y1, x2, y2].every(Number.isFinite)) {
+        noteDrop('rect-non-finite', ann); return null;
+      }
+      const rect: [number, number, number, number] = [
+        Math.min(x1, x2), Math.min(y1, y2),
+        Math.max(x1, x2), Math.max(y1, y2),
+      ];
+      if (rect[2] <= rect[0] || rect[3] <= rect[1]) {
+        noteDrop('rect-zero-area', ann); return null;
+      }
+
+      if (ann.url) {
+        const url = ann.url.trim();
+        const scheme = extractScheme(url);
+        // Load-bearing: parse scheme literally, never build a regex from
+        // consumer input. FORBIDDEN first (fence), ALLOWED second (decision).
+        if (!scheme) { noteDrop('no-scheme', ann); return null; }
+        if (FORBIDDEN_SCHEMES.has(scheme)) { noteDrop(`forbidden-scheme:${scheme}`, ann); return null; }
+        if (!allowedSchemes.has(scheme)) { noteDrop(`scheme-not-allowed:${scheme}`, ann); return null; }
+        return { rect, url };
+      }
+      if (ann.dest == null) { noteDrop('no-dest', ann); return null; }
+
+      const dest = typeof ann.dest === 'string'
+        ? await this.doc!.getDestination(ann.dest)
+        : ann.dest;
+      if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+      if (!Array.isArray(dest) || dest.length === 0) {
+        noteDrop('dest-unresolved', ann); return null;
+      }
+
+      const destPage = await this.doc!.getPageIndex(dest[0]);
+      if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+      // Symmetric with rect validation: pdfjs's getPageIndex can return NaN or
+      // Infinity on malformed page refs (technically `typeof number` but not
+      // renderable). LinkOverlay's normalizer catches these downstream via
+      // `Number.isInteger`, but recording the drop reason here preserves
+      // diagnostic parity with other filter sites — otherwise a `linkDiagnostics:
+      // true` consumer sees a link that isn't rendered with no matching drop
+      // reason in the log.
+      if (typeof destPage !== 'number' || !Number.isFinite(destPage) || destPage < 0) {
+        noteDrop('dest-invalid-number', ann); return null;
+      }
+      return { rect, destPage };
+    } catch (err: any) {
+      // Propagate aborts; drop everything else.
+      if (err?.name === 'AbortError') throw err;
+      noteDrop('exception', ann);
+      return null;
+    }
   }
 
   async renderPage(

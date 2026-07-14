@@ -2,6 +2,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
+
+// PageRenderer now reads from FlipbookContext (showLinks) and useFlipbookActions
+// (goToPage). These tests exercise only the PageRegistry wiring — mock the other
+// context reads to a minimal stub so tests don't need a full FlipbookProvider.
+vi.mock('../core/FlipbookContext', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../core/FlipbookContext')>();
+  return { ...actual, useFlipbookContext: () => ({ showLinks: true }) };
+});
+vi.mock('../hooks/useFlipbook', () => ({
+  useFlipbookActions: () => ({ goToPage: vi.fn() }),
+}));
+
 import { PageRenderer } from '../components/PageRenderer';
 import { PageRegistryWriteContext, type PageRegistryWrite, type PageRegistryEntry } from '../core/PageRegistry';
 import type { PageSource } from '../types/PageSource';

@@ -80,6 +80,14 @@ interface FlipbookCommonProps {
    * re-init) on every render, which reloads the document.
    */
   pdfjsOptions?: PdfjsSourceOptions;
+  /**
+   * Whether to render clickable link overlays on top of each page. Default `true`.
+   *
+   * Set `false` to opt out — useful for consumers with custom link UI, or when
+   * using a `source` that implements `getLinks()` but whose overlays would
+   * conflict with app-side interaction handling.
+   */
+  showLinks?: boolean;
   viewMode?: 'single' | 'dual-cover' | 'auto';
   initialPage?: number;
   renderError?: (error: Error) => ReactNode;
@@ -281,6 +289,7 @@ export function Flipbook({
   url,
   source,
   pdfjsOptions,
+  showLinks = true,
   viewMode,
   initialPage = 0,
   renderError,
@@ -450,6 +459,7 @@ export function Flipbook({
   return (
     <FlipbookProvider
       source={effectiveSource}
+      showLinks={showLinks}
       viewMode={viewMode}
       initialPage={initialPage}
       renderError={renderError}

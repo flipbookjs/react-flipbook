@@ -113,8 +113,12 @@ export interface PageSource {
   /** Optional: text content for selection/search (future 1.x minor) */
   getTextContent?(index: number): Promise<TextItem[]>;
 
-  /** Optional: link annotations (future 1.x minor) */
-  getLinks?(index: number): Promise<LinkAnnotation[]>;
+  /**
+   * Optional: link annotations for the given page.
+   * @param signal - optional AbortSignal. Implementations SHOULD reject with
+   *   `DOMException('...', 'AbortError')` when signalled.
+   */
+  getLinks?(index: number, signal?: AbortSignal): Promise<LinkAnnotation[]>;
 
   /** Optional: document outline / table of contents (future 1.x minor) */
   getOutline?(): Promise<OutlineItem[]>;
