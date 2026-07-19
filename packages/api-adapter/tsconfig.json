@@ -2,7 +2,8 @@
   "extends": "../../tsconfig.base.json",
   "include": ["src"],
   "compilerOptions": {
-    "outDir": "dist",
+    "outDir": "./dist",
+    "rootDir": "./src",
     "lib": ["DOM", "DOM.Iterable", "ES2022"],
     "types": ["node", "@testing-library/jest-dom"]
   }
