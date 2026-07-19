@@ -12,6 +12,9 @@
   .fbjs-thumbnail-panel {
     transition: none;
   }
+  .fbjs-thumbnail-panel__scroll {
+    scroll-behavior: auto;
+  }
 }
 
 .fbjs-thumbnail-panel__scroll {

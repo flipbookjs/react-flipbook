@@ -1,4 +1,4 @@
-import { memo, useCallback, useId, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useFlipbookSelector, shallowEqual } from '../hooks/useFlipbook';
 import { useIsomorphicLayoutEffect } from '../hooks/useIsomorphicLayoutEffect';
 import { useIsMounted } from '../toolbar/useIsMounted';
@@ -28,6 +28,29 @@ function warnOncePanelBothSupplied(): void {
   devWarn(
     `ThumbnailPanel: both density and width are supplied; width wins. Drop one to silence this warning.`,
   );
+}
+
+/**
+ * Direct scrollLeft assignment respects the container's CSS `scroll-behavior`
+ * in modern browsers. `.fbjs-thumbnail-panel__scroll` sets `scroll-behavior:
+ * smooth` (preserved because the roving-tabindex handler's `button.focus()`
+ * triggers a native scroll-into-view that inherits CSS and animates nicely
+ * for keyboard nav). Without a per-op override, our wheel handler and
+ * auto-follow instant path would animate over ~300ms per assignment —
+ * laggy wheel + reintroduced first-open jerk.
+ *
+ * The pattern mirrors interactionMode.css:17-21 (pan-mode `.fbjs-container`
+ * uses `scroll-behavior: auto` for the same reason with useSelectionMode's
+ * scrollLeft/Top writes). Rather than a container-wide CSS override that
+ * would also make keyboard `focus()` nav instant, this per-op wrapper
+ * preserves smooth focus-driven nav while giving us instant behaviour
+ * where we need it.
+ */
+function scrollInstantly(el: HTMLElement, left: number): void {
+  const original = el.style.scrollBehavior;
+  el.style.scrollBehavior = 'auto';
+  el.scrollLeft = left;
+  el.style.scrollBehavior = original;
 }
 
 /** Public props for `<ThumbnailPanel>`. The 2.0 discriminated union prevents
@@ -191,6 +214,10 @@ export const ThumbnailPanel = memo(function ThumbnailPanel(props: ThumbnailPanel
   // pattern keeps one observer alive for the scrollRoot's lifetime.
   const dimensionsReadyRef = useRef(false);
 
+  // Track previous open state so first-open uses the instant (direct scrollLeft)
+  // path while subsequent pageNumber changes use the smooth (scrollIntoView) path.
+  const prevIsOpenRef = useRef(false);
+
   // ActiveIndexStore — created ONCE per panel mount via useRef lazy
   // init. Stable identity for the panel's lifetime; context value
   // memoization never invalidates. Buttons subscribe via
@@ -314,6 +341,132 @@ export const ThumbnailPanel = memo(function ThumbnailPanel(props: ThumbnailPanel
   useIsomorphicLayoutEffect(() => {
     dimensionsReadyRef.current = dimensions !== null;
   }, [dimensions]);
+
+  // Wheel-to-horizontal translation on the scroll container.
+  //
+  // Attached imperatively with `{ passive: false }` because React 17+ attaches
+  // its synthetic wheel handlers as passive, and `preventDefault` on a passive
+  // listener is a no-op. Without preventDefault, our scrollLeft update coexists
+  // with the browser's default vertical page scroll — worse than the reported
+  // bug.
+  //
+  // Boundary behaviour: only preventDefault when the container can actually
+  // scroll further in the requested direction. At the horizontal edges, fall
+  // through to browser default so continued wheeling scrolls the outer page
+  // (matches how native macOS sub-scrollers behave).
+  useEffect(() => {
+    if (!scrollRoot) return;
+
+    // WheelEvent.deltaY is in pixels only when deltaMode === 0. Firefox on some
+    // Linux/Windows setups reports deltaMode === 1 (lines, ~3-5 units per tick)
+    // or 2 (pages). Without normalization, "wheel down" on those setups would
+    // scroll 3 pixels per tick — invisible.
+    const LINE_HEIGHT_PX = 40;
+
+    const onWheel = (e: WheelEvent) => {
+      // Preserve native semantics for inputs that aren't a pure vertical wheel:
+      //  - Horizontal trackpad input (deltaX !== 0)             → skip
+      //  - Ctrl/Meta + wheel (browser zoom / consumer bindings) → skip
+      if (e.deltaY === 0) return;
+      if (e.deltaX !== 0) return;
+      if (e.ctrlKey || e.metaKey) return;
+
+      const dy =
+        e.deltaMode === 0 ? e.deltaY
+        : e.deltaMode === 1 ? e.deltaY * LINE_HEIGHT_PX
+        : /* deltaMode === 2 (pages) */ e.deltaY * scrollRoot.clientWidth;
+
+      const maxScroll = scrollRoot.scrollWidth - scrollRoot.clientWidth;
+      const atRightEdge = scrollRoot.scrollLeft >= maxScroll;
+      const atLeftEdge = scrollRoot.scrollLeft <= 0;
+      if (dy > 0 && atRightEdge) return;
+      if (dy < 0 && atLeftEdge) return;
+
+      e.preventDefault();
+      scrollInstantly(scrollRoot, scrollRoot.scrollLeft + dy);
+    };
+
+    scrollRoot.addEventListener('wheel', onWheel, { passive: false });
+    return () => scrollRoot.removeEventListener('wheel', onWheel);
+  }, [scrollRoot]);
+
+  // Auto-follow: when pageNumber advances via any external navigation (toolbar
+  // prev/next, keyboard on the flipbook, click-in-document, panel-open), scroll
+  // the current-page thumbnail into view.
+  //
+  // Keyboard nav *inside* the panel is deliberately excluded via the active-
+  // element guard below — the roving-tabindex handler's focus() call already
+  // triggered a native scroll-into-view, and issuing a second scrollIntoView
+  // mid-animation on the same container is spec-undefined behaviour.
+  //
+  // MUST remain `useEffect` (not `useLayoutEffect`) — ThumbnailButton's
+  // registerButton runs inside useEffect, and React fires child useEffect
+  // callbacks before parent useEffect callbacks. That ordering guarantee lets
+  // this effect find populated buttonsRef entries on first mount. Switching
+  // either side to useLayoutEffect would invert the ordering.
+  //
+  // INVARIANT: all <ThumbnailButton> entries render regardless of visibility —
+  // only the inner canvas is virtualized (see Array.from at line 550). If
+  // button-level virtualization is ever added, `buttonsRef.current.get(pageIndex)`
+  // will return undefined for offscreen pages and the scrollIntoView call below
+  // will throw with a clear "Cannot read properties of undefined" pointing at
+  // this exact line. That's the desired fail-loud outcome (house-rules Rule 1)
+  // — no runtime null-check, per house-rules Rule 3 (no defensive coding
+  // against self-imposed invariants).
+  useEffect(() => {
+    if (!scrollRoot || !slice.isOpen || dimensions === null || containerMetrics === null) return;
+
+    // Skip when the user is keyboard-navigating inside the panel. ThumbnailButton's
+    // arrow-key handler already fired button.focus() → native scroll-into-view;
+    // a second scrollIntoView on the same container mid-animation is undefined
+    // per spec (Chrome usually no-ops, Safari has historically restarted).
+    if (scrollRoot.contains(document.activeElement)) return;
+
+    const wasOpen = prevIsOpenRef.current;
+    prevIsOpenRef.current = true;
+
+    const prefersReducedMotion =
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    const targetIndex = slice.pageNumber - 1;
+    const wantsInstant = !wasOpen || prefersReducedMotion;
+
+    if (wantsInstant) {
+      // Instant path via scrollInstantly helper (see Phase 3 Step 2a). Direct
+      // scrollLeft assignment respects CSS `scroll-behavior` in modern
+      // browsers; the container's `scroll-behavior: smooth` would otherwise
+      // animate this write over ~300ms and reintroduce the first-open jerk.
+      // The helper wraps with `style.scrollBehavior = 'auto'` before the
+      // write and restores after — preserves smooth CSS for the focus() code
+      // path (roving-tabindex keyboard nav) while giving us instant behaviour
+      // here. `scrollIntoView({ behavior: 'instant' })` is not a workable
+      // alternative — its `'instant'` value has narrow browser support (Chrome
+      // 128+, Safari 17.4+); on older matrix-minimum browsers it falls back
+      // to CSS-inherited 'smooth', reintroducing the same jerk.
+      let buttonOffset = 0;
+      for (let i = 0; i < targetIndex; i++) {
+        buttonOffset += dimensions[i].width + containerMetrics.gapPx;
+      }
+      const maxScroll = scrollRoot.scrollWidth - scrollRoot.clientWidth;
+      scrollInstantly(scrollRoot, Math.max(0, Math.min(buttonOffset, maxScroll)));
+      return;
+    }
+
+    // Subsequent-navigation path: smooth-scroll via scrollIntoView. 'smooth'
+    // is universally supported in matrix browsers since ~2018. No null-check
+    // on the map lookup — the INVARIANT above guarantees the entry exists;
+    // if it doesn't, we want the crash (see the invariant comment for why).
+    buttonsRef.current
+      .get(targetIndex)!
+      .scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+  }, [slice.pageNumber, slice.isOpen, scrollRoot, dimensions, containerMetrics]);
+
+  // Reset prevIsOpenRef when the panel closes so the NEXT open uses the instant
+  // path again. Without this, a close-then-reopen would use smooth on the reopen
+  // and reintroduce the jerk.
+  useEffect(() => {
+    if (!slice.isOpen) prevIsOpenRef.current = false;
+  }, [slice.isOpen]);
 
   // ResizeObserver lifecycle. ONE observer per scrollRoot mount. Cache
   // padX + gapPx once via getComputedStyle (forces style resolution — ~10x

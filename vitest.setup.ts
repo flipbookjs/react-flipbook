@@ -1,9 +1,26 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
-import { afterEach } from 'vitest';
+import { afterEach, vi } from 'vitest';
+
+// jsdom doesn't implement scrollIntoView — needed by ThumbnailPanel auto-follow tests.
+// The outer `typeof HTMLElement !== 'undefined'` guard matches the existing polyfill
+// pattern for matchMedia below — vitest.setup.ts is loaded for EVERY test run
+// regardless of `// @vitest-environment` directive, and Node-env test files
+// (SSRSafety, flipbookSSR, etc.) have no HTMLElement global. Bare reference would
+// ReferenceError before typeof could evaluate the property access.
+if (typeof HTMLElement !== 'undefined' && typeof HTMLElement.prototype.scrollIntoView === 'undefined') {
+  HTMLElement.prototype.scrollIntoView = vi.fn();
+}
 
 afterEach(() => {
   cleanup();
+  // Clear scrollIntoView call history between tests. vitest.config.ts does not
+  // enable restoreMocks/clearMocks globally, so per-test leakage is a real
+  // concern for the shared prototype stub. Same Node-env guard as the polyfill
+  // above — mockClear on undefined HTMLElement would ReferenceError.
+  if (typeof HTMLElement !== 'undefined') {
+    vi.mocked(HTMLElement.prototype.scrollIntoView).mockClear();
+  }
 });
 
 // Polyfills required for pdfjs-dist and PageRenderer in Node/jsdom (Week 0 findings)
