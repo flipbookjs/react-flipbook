@@ -68,14 +68,17 @@ describe('FlipbookProvider — conditional CurlOverlay mount', () => {
     );
   });
 
-  it('does NOT mount CurlOverlay when resolvedViewMode==="single"', async () => {
+  it('mounts CurlOverlay in single-page view mode (curl active in single + dual)', async () => {
     const source = makeStubSource();
     const { container } = render(
       <FlipbookProvider source={source} viewMode="single" enablePageCurl />,
     );
 
     await waitFor(() => expect(container.querySelector('.fbjs-stage')).not.toBeNull());
-    expect(container.querySelector('.fbjs-curl-overlay')).toBeNull();
+    await waitFor(
+      () => expect(container.querySelector('.fbjs-curl-overlay')).not.toBeNull(),
+      { timeout: 2000 },
+    );
   });
 
   it('does NOT mount CurlOverlay until showContent is true', async () => {

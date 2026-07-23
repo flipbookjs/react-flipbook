@@ -17,9 +17,10 @@ interface CurlOverlayProps {
  * CurlOverlay — full rewrite per Decision 5.
  *
  * Mounted conditionally by FlipbookProvider (via React.lazy + Suspense) ONLY when
- * `enablePageCurl && resolvedViewMode === 'dual-cover' && showContent`. When this
- * component renders, those preconditions are guaranteed by the caller. The internal
- * `enabled` flag for useCurlMode is therefore tied only to `!degraded`.
+ * `enablePageCurl && showContent && !isOverflowing && !prefersReducedMotion` — in
+ * both single-page and dual-cover view modes. When this component renders, those
+ * preconditions are guaranteed by the caller. The internal `enabled` flag for
+ * useCurlMode is therefore tied only to `!degraded`.
  *
  * Hook order (linear, no cycles):
  *   1. spreadGeometry — derived from FlipbookContext (pure)

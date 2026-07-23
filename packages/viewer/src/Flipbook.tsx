@@ -92,13 +92,14 @@ interface FlipbookCommonProps {
   initialPage?: number;
   renderError?: (error: Error) => ReactNode;
   renderLoading?: () => ReactNode;
-  /** Enable page-curl animation on pointer/wheel interactions. Defaults to false (opt-in).
-   *  Only active when resolvedViewMode === 'dual-cover'. Curl engine lazy-loaded.
+  /** Enable page-curl animation on pointer/wheel/keyboard/arrow navigation. Defaults
+   *  to false (opt-in). Active in both single-page and dual-cover view modes. Curl
+   *  engine lazy-loaded; suppressed under `prefers-reduced-motion` and when zoomed.
    *
    *  Document-behavior prop — available on BOTH built-in and custom toolbar variants
    *  (declared on FlipbookCommonProps, NOT only on VisibilityProps). The toolbar's
    *  selection-mode button reads it for curl-aware disabled state; the document's
-   *  curl-engine reads it for chunk preload + dual-cover gesture handling. Both
+   *  curl-engine reads it for chunk preload + gesture handling. Both
    *  concerns are independent of toolbar variant. */
   enablePageCurl?: boolean;
   /** Initial zoom mode or scale. String values map to fit modes; numeric values map

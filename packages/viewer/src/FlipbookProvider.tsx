@@ -124,9 +124,11 @@ interface FlipbookProviderProps {
   initialPage?: number;
   renderError?: (error: Error) => ReactNode;
   renderLoading?: () => ReactNode;
-  /** Enable page-curl animation on pointer/wheel interactions. Defaults to false (opt-in).
-   *  Curl engine is lazy-loaded as a separate chunk only when this is true. Only active
-   *  when `resolvedViewMode === 'dual-cover'`. */
+  /** Enable page-curl animation on pointer/wheel/keyboard/arrow navigation. Defaults
+   *  to false (opt-in). Curl engine is lazy-loaded as a separate chunk only when this
+   *  is true. Active in both single-page and dual-cover view modes (in single mode the
+   *  incoming page curls in over the current one). Suppressed under
+   *  `prefers-reduced-motion` and when zoomed past fit. */
   enablePageCurl?: boolean;
   /** Initial zoom mode or scale. Wired to 5A's `createInitialState(viewMode, defaultScale)`
    *  factory parameter. Defaults to `'fit-page'`. */
@@ -1107,9 +1109,13 @@ export function FlipbookProvider({
   //       Cancels in-flight curl that would otherwise read stale pageWidth/
   //       pageHeight derived from the new effectiveScale.
   // Both paths increment the same counter; redundant but harmless.
+  // Curl is active in BOTH single-page and dual-cover view modes. In single mode
+  // the adjacent spread has one page, so the incoming page curls in over the
+  // current one (the render callback's dual "leaf + reveal" split collapses to a
+  // single seamless incoming surface — see useCurlRenderCallback). Not gated on
+  // view mode; only on the engine preconditions.
   const showCurlOverlay = showContent
     && enablePageCurl
-    && state.resolvedViewMode === 'dual-cover'
     && !isOverflowing
     && !prefersReducedMotion;
 
