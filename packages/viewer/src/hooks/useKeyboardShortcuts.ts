@@ -99,11 +99,14 @@ export function useKeyboardShortcuts(
       switch (e.key) {
         case 'ArrowRight':
           e.preventDefault();
-          dispatch({ type: 'NEXT_SPREAD' });
+          // Route through the action layer (NOT a raw dispatch) so the move
+          // curl-animates when the curl engine is active — matching the arrows
+          // and wheel. `next()` snap-dispatches when curl is off/unavailable.
+          actionsRef.current.next();
           break;
         case 'ArrowLeft':
           e.preventDefault();
-          dispatch({ type: 'PREV_SPREAD' });
+          actionsRef.current.previous();
           break;
         case 'Home':
           e.preventDefault();

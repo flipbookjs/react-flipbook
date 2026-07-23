@@ -69,7 +69,10 @@ export interface CurlAnimationActions {
   startDrag: (direction: 'next' | 'previous') => void;
   updateDrag: (point: Point) => void;
   endDrag: () => void;
-  startAnimatedCurl: (direction: 'next' | 'previous') => void;
+  /** Returns true if the animation actually started, false if a guard rejected it
+   *  (not enabled, or not in an idle/hovering state). Callers that need to fall
+   *  back to a plain snap (programmatic nav) read this; the wheel caller ignores it. */
+  startAnimatedCurl: (direction: 'next' | 'previous') => boolean;
   /** Show a small corner peel hint. */
   startHover: (direction: 'next' | 'previous') => void;
   /** Hide the corner peel hint. */
@@ -439,9 +442,9 @@ export const useCurlAnimation = (
     }
   };
 
-  const startAnimatedCurl = (direction: 'next' | 'previous') => {
-    if (!enabledRef.current) return;
-    if (stateRef.current !== 'idle' && stateRef.current !== 'hovering') return;
+  const startAnimatedCurl = (direction: 'next' | 'previous'): boolean => {
+    if (!enabledRef.current) return false;
+    if (stateRef.current !== 'idle' && stateRef.current !== 'hovering') return false;
     curlAssert(
       pageRectRef.current.width > 0 && pageRectRef.current.height > 0,
       'startAnimatedCurl',
@@ -458,6 +461,7 @@ export const useCurlAnimation = (
     const startPoint = getCancelPoint();
     recalcAndRender(startPoint);
     startAutoAnimate(startPoint, getCompletePoint(), true);
+    return true;
   };
 
   const cancel = () => {

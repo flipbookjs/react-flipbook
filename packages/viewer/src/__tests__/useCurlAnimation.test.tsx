@@ -55,6 +55,7 @@ function makeCtxValue(stateOverride: Partial<FlipbookState> = {}, dispatch = vi.
     effectiveScale: 1,
     isOverflowing: false,
     registerCurlWheelHandler: vi.fn(),
+    registerCurlNavHandler: vi.fn(),
     sourceStatus: 'ready',
     sourceError: null,
     showLinks: true,

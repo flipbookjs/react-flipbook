@@ -19,6 +19,16 @@ export interface FlipbookContextValue {
   registerCurlWheelHandler: (
     handler: ((direction: 'next' | 'previous') => void) | null,
   ) => void;
+  /** Curl module registers its programmatic-nav callback via this setter.
+   *  FlipbookProvider's `navigateAdjacent` invokes it for arrow / keyboard /
+   *  `next()` / `previous()` navigation. Returns true if the curl engine handled
+   *  the move (started a curl, or intentionally ignored it while animating / at an
+   *  edge); false if the caller should snap-dispatch the spread change instead.
+   *  Null when curl is unavailable (disabled, degraded, zoomed, reduced-motion) —
+   *  `navigateAdjacent` then snaps. Ref-backed — no re-render on registration. */
+  registerCurlNavHandler: (
+    handler: ((direction: 'next' | 'previous') => boolean) | null,
+  ) => void;
   // ---- Step 6A additions (Decision 1 of step-6-architectural-plan.md) ----
   /** Mirrors `usePageSource.SourceState.status`. The public `useFlipbook` hook
    *  maps this to the top-level `status` field of the discriminated `FlipbookHook`.

@@ -39,6 +39,8 @@ function setup() {
   const dispatch = vi.fn<(action: FlipbookAction) => void>();
   const actions: FlipbookHookActions = {
     ...SSR_ACTIONS,
+    next: vi.fn(),
+    previous: vi.fn(),
     zoomIn: vi.fn(),
     zoomOut: vi.fn(),
     fitPage: vi.fn(),
@@ -64,16 +66,21 @@ function key(container: HTMLElement, init: KeyboardEventInit & { target?: HTMLEl
 }
 
 describe('useKeyboardShortcuts — navigation', () => {
-  it('ArrowRight → NEXT_SPREAD', () => {
-    const { container, dispatch } = setup();
+  // Arrows route through the action layer (NOT a raw dispatch) so the move
+  // curl-animates when the curl engine is active; `next()`/`previous()` fall back
+  // to a snap dispatch when curl is off. This mirrors the End-key contract below.
+  it('ArrowRight → actions.next', () => {
+    const { container, actions, dispatch } = setup();
     key(container, { key: 'ArrowRight' });
-    expect(dispatch).toHaveBeenCalledWith({ type: 'NEXT_SPREAD' });
+    expect(actions.next).toHaveBeenCalledTimes(1);
+    expect(dispatch).not.toHaveBeenCalledWith({ type: 'NEXT_SPREAD' });
   });
 
-  it('ArrowLeft → PREV_SPREAD', () => {
-    const { container, dispatch } = setup();
+  it('ArrowLeft → actions.previous', () => {
+    const { container, actions, dispatch } = setup();
     key(container, { key: 'ArrowLeft' });
-    expect(dispatch).toHaveBeenCalledWith({ type: 'PREV_SPREAD' });
+    expect(actions.previous).toHaveBeenCalledTimes(1);
+    expect(dispatch).not.toHaveBeenCalledWith({ type: 'PREV_SPREAD' });
   });
 
   it('Home → GO_TO_SPREAD index=0', () => {

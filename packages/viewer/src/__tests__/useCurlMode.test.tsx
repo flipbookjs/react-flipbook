@@ -34,7 +34,7 @@ function buildContext(opts: { pageCount?: number; currentSpreadIndex?: number; r
   };
   const spreads = computeSpreads(pageCount, resolvedViewMode);
   state.spreadCount = spreads.length;
-  return { state, dispatch: vi.fn(), source, spreads, effectiveScale: 1, isOverflowing: false, registerCurlWheelHandler: vi.fn(), sourceStatus: 'ready', sourceError: null, showLinks: true };
+  return { state, dispatch: vi.fn(), source, spreads, effectiveScale: 1, isOverflowing: false, registerCurlWheelHandler: vi.fn(), registerCurlNavHandler: vi.fn(), sourceStatus: 'ready', sourceError: null, showLinks: true };
 }
 
 function Wrapper({ ctxValue, registry, children }: { ctxValue: FlipbookContextValue; registry: PageRegistryRead; children: ReactNode }) {
@@ -270,7 +270,7 @@ describe('useCurlMode — wheel handler registration', () => {
     const captured = registerMock.mock.calls[0][0] as (d: 'next' | 'previous') => void;
     expect(typeof captured).toBe('function');
 
-    const startSpy = vi.spyOn(result.current.actions, 'startAnimatedCurl').mockImplementation(() => {});
+    const startSpy = vi.spyOn(result.current.actions, 'startAnimatedCurl').mockImplementation(() => true);
 
     captured('next');
     expect(startSpy).toHaveBeenCalledWith('next');
@@ -287,9 +287,102 @@ describe('useCurlMode — wheel handler registration', () => {
     const captured = registerMock.mock.calls[0][0] as (d: 'next' | 'previous') => void;
 
     vi.spyOn(result.current.actions, 'isAnimating').mockReturnValue(true);
-    const startSpy = vi.spyOn(result.current.actions, 'startAnimatedCurl').mockImplementation(() => {});
+    const startSpy = vi.spyOn(result.current.actions, 'startAnimatedCurl').mockImplementation(() => true);
 
     captured('next');
+    expect(startSpy).not.toHaveBeenCalled();
+  });
+
+  // --- Programmatic-nav handler (arrows / keyboard / next()/previous()) ---
+
+  it('registers a curl nav handler on mount when enabled=true', () => {
+    const ctxValue = buildContext({});
+    const { read } = createPageRegistry();
+    renderHook(
+      () => useTestHarness({ enabled: true, ctxValue, registryRead: read, registryVersion: 0 }),
+      { wrapper: ({ children }) => <Wrapper ctxValue={ctxValue} registry={read}>{children}</Wrapper> },
+    );
+    expect(ctxValue.registerCurlNavHandler).toHaveBeenCalledTimes(1);
+    expect(ctxValue.registerCurlNavHandler).toHaveBeenCalledWith(expect.any(Function));
+  });
+
+  it('nav handler unregisters on cleanup (passes null)', () => {
+    const ctxValue = buildContext({});
+    const { read } = createPageRegistry();
+    const { unmount } = renderHook(
+      () => useTestHarness({ enabled: true, ctxValue, registryRead: read, registryVersion: 0 }),
+      { wrapper: ({ children }) => <Wrapper ctxValue={ctxValue} registry={read}>{children}</Wrapper> },
+    );
+    (ctxValue.registerCurlNavHandler as ReturnType<typeof vi.fn>).mockClear();
+    unmount();
+    expect(ctxValue.registerCurlNavHandler).toHaveBeenCalledWith(null);
+  });
+
+  it('does NOT register a nav handler when enabled=false', () => {
+    const ctxValue = buildContext({});
+    const { read } = createPageRegistry();
+    renderHook(
+      () => useTestHarness({ enabled: false, ctxValue, registryRead: read, registryVersion: 0 }),
+      { wrapper: ({ children }) => <Wrapper ctxValue={ctxValue} registry={read}>{children}</Wrapper> },
+    );
+    expect(ctxValue.registerCurlNavHandler).not.toHaveBeenCalled();
+  });
+
+  it('nav handler curls (returns true + fires startAnimatedCurl) when the target bitmap is ready', () => {
+    const ctxValue = buildContext({});
+    const registry = createPageRegistry();
+    for (let i = 0; i < 10; i++) {
+      registry.write.register(i, {
+        canvas: document.createElement('canvas'),
+        element: document.createElement('div'),
+      });
+    }
+    const { result } = renderHook(
+      () => useTestHarness({ enabled: true, ctxValue, registryRead: registry.read, registryVersion: 1 }),
+      { wrapper: ({ children }) => <Wrapper ctxValue={ctxValue} registry={registry.read}>{children}</Wrapper> },
+    );
+    const registerMock = ctxValue.registerCurlNavHandler as ReturnType<typeof vi.fn>;
+    const captured = registerMock.mock.calls[0][0] as (d: 'next' | 'previous') => boolean;
+    const startSpy = vi.spyOn(result.current.actions, 'startAnimatedCurl').mockImplementation(() => true);
+
+    expect(captured('next')).toBe(true);
+    expect(startSpy).toHaveBeenCalledWith('next');
+  });
+
+  it('nav handler snaps (returns false, no curl) when the target bitmap is NOT ready', () => {
+    const ctxValue = buildContext({});
+    const { read } = createPageRegistry(); // empty → bitmap not ready
+    const { result } = renderHook(
+      () => useTestHarness({ enabled: true, ctxValue, registryRead: read, registryVersion: 0 }),
+      { wrapper: ({ children }) => <Wrapper ctxValue={ctxValue} registry={read}>{children}</Wrapper> },
+    );
+    const registerMock = ctxValue.registerCurlNavHandler as ReturnType<typeof vi.fn>;
+    const captured = registerMock.mock.calls[0][0] as (d: 'next' | 'previous') => boolean;
+    const startSpy = vi.spyOn(result.current.actions, 'startAnimatedCurl').mockImplementation(() => true);
+
+    expect(captured('next')).toBe(false);
+    expect(startSpy).not.toHaveBeenCalled();
+  });
+
+  it('nav handler ignores (returns true, no curl) while a curl is animating', () => {
+    const ctxValue = buildContext({});
+    const registry = createPageRegistry();
+    for (let i = 0; i < 10; i++) {
+      registry.write.register(i, {
+        canvas: document.createElement('canvas'),
+        element: document.createElement('div'),
+      });
+    }
+    const { result } = renderHook(
+      () => useTestHarness({ enabled: true, ctxValue, registryRead: registry.read, registryVersion: 1 }),
+      { wrapper: ({ children }) => <Wrapper ctxValue={ctxValue} registry={registry.read}>{children}</Wrapper> },
+    );
+    const registerMock = ctxValue.registerCurlNavHandler as ReturnType<typeof vi.fn>;
+    const captured = registerMock.mock.calls[0][0] as (d: 'next' | 'previous') => boolean;
+    vi.spyOn(result.current.actions, 'isAnimating').mockReturnValue(true);
+    const startSpy = vi.spyOn(result.current.actions, 'startAnimatedCurl').mockImplementation(() => true);
+
+    expect(captured('next')).toBe(true);
     expect(startSpy).not.toHaveBeenCalled();
   });
 });

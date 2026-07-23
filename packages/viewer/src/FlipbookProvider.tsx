@@ -36,6 +36,7 @@ import {
   type FlipbookSnapshot,
 } from './hooks/useFlipbook';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { usePrefersReducedMotion } from './hooks/usePrefersReducedMotion';
 import { useIsomorphicLayoutEffect } from './hooks/useIsomorphicLayoutEffect';
 import { useFullScreen } from './hooks/useFullScreen';
 import { useSelectionMode } from './hooks/useSelectionMode';
@@ -493,6 +494,38 @@ export function FlipbookProvider({
     [],
   );
 
+  // Programmatic-nav curl handler (arrows / keyboard / next()/previous()). Same
+  // ref-backed pattern as the wheel handler; the handler returns true when the
+  // curl engine handled the move (curled, or ignored while animating / at an edge)
+  // and false when the caller should snap. Null whenever curl is unavailable
+  // (disabled, degraded, zoomed, reduced-motion — the overlay unmounts and its
+  // effect cleanup nulls this), so `navigateAdjacent` snaps in those windows.
+  const curlNavHandlerRef = useRef<((d: 'next' | 'previous') => boolean) | null>(null);
+  const registerCurlNavHandler = useCallback(
+    (handler: ((d: 'next' | 'previous') => boolean) | null) => {
+      curlNavHandlerRef.current = handler;
+    },
+    [],
+  );
+
+  // Single routing point for every adjacent page move. Curl-animates when the
+  // engine is present and ready; otherwise snaps. Jumps (goToPage/first/last) do
+  // NOT route through here — a curl is a single-spread flip.
+  const navigateAdjacent = useCallback(
+    (direction: 'next' | 'previous') => {
+      const handled = curlNavHandlerRef.current?.(direction) ?? false;
+      if (!handled) {
+        dispatch({ type: direction === 'next' ? 'NEXT_SPREAD' : 'PREV_SPREAD' });
+      }
+    },
+    [dispatch],
+  );
+
+  // Reduced-motion gate for the curl engine. When active, the curl overlay is not
+  // rendered (see `showCurlOverlay`), so no curl handler registers and every
+  // navigation — arrows, keyboard, wheel, gesture — snaps.
+  const prefersReducedMotion = usePrefersReducedMotion();
+
   // Leading-edge zoom throttle state — see useWheelRouter for the throttle logic.
   // Initialized to -Infinity so the FIRST wheel event is never swallowed by the
   // throttle window. With `0` as the initial value, a user's first Ctrl+wheel
@@ -532,12 +565,14 @@ export function FlipbookProvider({
   // 8. Render
   const contextValue = useMemo(
     () => ({
-      state, dispatch, source, spreads, effectiveScale, isOverflowing, registerCurlWheelHandler,
+      state, dispatch, source, spreads, effectiveScale, isOverflowing,
+      registerCurlWheelHandler, registerCurlNavHandler,
       sourceStatus, sourceError,
       showLinks,
     }),
     [
-      state, dispatch, source, spreads, effectiveScale, isOverflowing, registerCurlWheelHandler,
+      state, dispatch, source, spreads, effectiveScale, isOverflowing,
+      registerCurlWheelHandler, registerCurlNavHandler,
       sourceStatus, sourceError,
       showLinks,
     ],
@@ -608,8 +643,8 @@ export function FlipbookProvider({
   // implementation can read the latest source instance). Every other action
   // reads state/derived values via the refs above.
 
-  const next      = useCallback(() => dispatch({ type: 'NEXT_SPREAD' }),                              [dispatch]);
-  const previous  = useCallback(() => dispatch({ type: 'PREV_SPREAD' }),                              [dispatch]);
+  const next      = useCallback(() => navigateAdjacent('next'),                                       [navigateAdjacent]);
+  const previous  = useCallback(() => navigateAdjacent('previous'),                                   [navigateAdjacent]);
   const goToFirst = useCallback(() => dispatch({ type: 'GO_TO_SPREAD', index: 0 }),                   [dispatch]);
 
   // goToLast: status guard for developer-facing correctness, NOT for reducer
@@ -1075,7 +1110,8 @@ export function FlipbookProvider({
   const showCurlOverlay = showContent
     && enablePageCurl
     && state.resolvedViewMode === 'dual-cover'
-    && !isOverflowing;
+    && !isOverflowing
+    && !prefersReducedMotion;
 
   return (
     <FlipbookRefsContext.Provider value={refsValue}>

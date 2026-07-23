@@ -5,6 +5,7 @@ import { useFlipbookContext } from '../core/FlipbookContext';
 import { useCurlAnimation, type CurlAnimationSnapshot, type CurlAnimationActions } from './useCurlAnimation';
 import { usePageCurlGesture } from './usePageCurlGesture';
 import { decideCurlWheelDispatch } from './wheelDecision';
+import { decideCurlNavDispatch } from './navDecision';
 import type { PageRegistryRead } from '../core/PageRegistry';
 import type { SpreadGeometry } from './spreadGeometry';
 import { WHEEL_THROTTLE_MS } from '../zoom/wheelTiming';
@@ -38,7 +39,7 @@ export interface UseCurlModeReturn {
 
 export const useCurlMode = (params: UseCurlModeParams): UseCurlModeReturn => {
   const { enabled, stageRef, overlayRef, overlayRect, spreadGeometry, registryRead, registryVersion } = params;
-  const { state, source, effectiveScale, registerCurlWheelHandler } = useFlipbookContext();
+  const { state, source, effectiveScale, registerCurlWheelHandler, registerCurlNavHandler } = useFlipbookContext();
   const { resolvedViewMode, pageCount } = state;
 
   // --- Page dimensions (CSS pixels at current scale) ---
@@ -149,6 +150,45 @@ export const useCurlMode = (params: UseCurlModeParams): UseCurlModeReturn => {
     hasNextSpread,        // required to refresh the registered closure when
     hasPreviousSpread,    //   spread-existence flips (e.g., SOURCE_CHANGED
     nextBitmapReady,      //   action shifts page count).
+    prevBitmapReady,
+  ]);
+
+  // --- Programmatic-nav handler registration ---
+  // FlipbookProvider's `navigateAdjacent` (arrows / keyboard / next()/previous())
+  // plugs in here, symmetric with the wheel handler above. Uses
+  // `decideCurlNavDispatch` — no cooldown (clicks are discrete), and it snaps
+  // rather than drops when the target bitmap is not ready. The handler returns
+  // true when the curl engine handled the move (so the provider skips its snap
+  // dispatch) and false when the provider should snap.
+  useEffect(() => {
+    if (!enabled) return;
+
+    const handler = (direction: 'next' | 'previous'): boolean => {
+      const decision = decideCurlNavDispatch({
+        direction,
+        isAnimating: actions.isAnimating(),
+        hasNextSpread,
+        hasPreviousSpread,
+        nextBitmapReady,
+        prevBitmapReady,
+      });
+      // 'curl' → try to start; `startAnimatedCurl` returns false if a guard
+      //   rejects it, and the provider then snap-fallbacks (a click never no-ops).
+      // 'ignore' → swallow (already animating or at an edge): handled, no snap.
+      // 'snap' → let the provider dispatch the plain spread change.
+      if (decision === 'curl') return actions.startAnimatedCurl(direction);
+      return decision === 'ignore';
+    };
+
+    registerCurlNavHandler(handler);
+    return () => registerCurlNavHandler(null);
+  }, [
+    enabled,
+    registerCurlNavHandler,
+    actions,
+    hasNextSpread,
+    hasPreviousSpread,
+    nextBitmapReady,
     prevBitmapReady,
   ]);
 
