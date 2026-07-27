@@ -2,6 +2,7 @@ import {
   useReducer,
   useEffect,
   useRef,
+  useState,
   useMemo,
   useCallback,
   lazy,
@@ -510,23 +511,131 @@ export function FlipbookProvider({
     [],
   );
 
+  // Cover-open: the cover rests centred. On the first "next" (from ANY input —
+  // scroll, arrow, toolbar), slide it to its slot FIRST, and only AFTER that slide
+  // fire the page turn. Refs keep the callbacks stable + readable in event handlers.
+  const COVER_MOVE_MS = 450;
+  const [coverOpening, setCoverOpening] = useState(false);
+  const coverOpeningRef = useRef(false);
+  coverOpeningRef.current = coverOpening;
+  const coverSettledRef = useRef(false); // page turn fires once per open
+  const coverReturnArmedRef = useRef(false); // reverse: cover pre-slotted, awaiting arrival
+  // The whole book-open (centre + slide + fold) is a curl-mode animation — gate it on
+  // enablePageCurl && !reduced-motion, exactly like the curl overlay. Assigned below
+  // once prefersReducedMotion is known; read at call-time by maybeStartCoverOpen.
+  const bookOpenEnabledRef = useRef(false);
+  // Bumped when the cover reaches its slot → forces the curl overlay to re-measure at
+  // the NEW position before the fold starts (its cached rect still has the old centre).
+  const [coverSettleVersion, setCoverSettleVersion] = useState(0);
+  const spreadIdxRef = useRef(state.currentSpreadIndex);
+  spreadIdxRef.current = state.currentSpreadIndex;
+  const resolvedViewModeRef = useRef(state.resolvedViewMode);
+  resolvedViewModeRef.current = state.resolvedViewMode;
+
+  // The page turn — fired ONLY once the cover slide is CONFIRMED finished. The signal
+  // is the cover's real `transitionend` (SpreadRenderer calls this via onCoverSettled),
+  // not a guessed timer. Idempotent per open so transitionend + the safety net can't
+  // double-fire. Clean separation: re-measure the overlay at the slot, THEN (next frame,
+  // once that measurement has propagated) start the fold — so it folds from the slot.
+  const finishCoverOpen = useCallback(() => {
+    if (!coverOpeningRef.current || coverSettledRef.current) return;
+    coverSettledRef.current = true;
+    setCoverSettleVersion((v) => v + 1);
+    window.requestAnimationFrame(() => {
+      const handled = curlNavHandlerRef.current?.('next') ?? false;
+      if (!handled) dispatch({ type: 'NEXT_SPREAD' });
+    });
+  }, [dispatch]);
+
+  // At the cover, going next: the cover-open owns this move. CONSUME every such event
+  // (return true) so nothing falls through to the curl mid-slide — critical for a
+  // trackpad scroll's burst of wheel events. The FIRST call starts the slide; the page
+  // turn then waits for the slide to actually finish (transitionend), NOT a blind timer.
+  const maybeStartCoverOpen = useCallback(
+    (direction: 'next' | 'previous'): boolean => {
+      if (!bookOpenEnabledRef.current || resolvedViewModeRef.current !== 'dual-cover') {
+        return false;
+      }
+
+      // OPENING: 'next' at the cover → slide to slot, then fold. CONSUME every event.
+      if (direction === 'next' && spreadIdxRef.current === 0) {
+        if (!coverOpeningRef.current) {
+          coverSettledRef.current = false;
+          setCoverOpening(true);
+          coverOpeningRef.current = true;
+          // Safety net ONLY (if transitionend never fires): finish a bit after the
+          // expected duration so navigation can't wedge. Normal path is transitionend.
+          window.setTimeout(finishCoverOpen, COVER_MOVE_MS + 200);
+        }
+        return true;
+      }
+
+      // RETURNING: 'previous' from the first spread → pre-position the cover at its slot
+      // (still hidden, so the isCurrent-gated transition is off → it snaps there) so the
+      // flip-back lands on it; the slot→centre slide plays on arrival (effect below). Do
+      // NOT consume — the curl performs the flip-back itself.
+      if (direction === 'previous' && spreadIdxRef.current === 1) {
+        if (!coverReturnArmedRef.current) {
+          coverReturnArmedRef.current = true;
+          setCoverOpening(true);
+          coverOpeningRef.current = true;
+        }
+        return false;
+      }
+
+      return false;
+    },
+    [finishCoverOpen],
+  );
+  // Ref mirror so the wheel router (empty-deps listener) calls the latest.
+  const coverOpenHandlerRef = useRef(maybeStartCoverOpen);
+  coverOpenHandlerRef.current = maybeStartCoverOpen;
+
   // Single routing point for every adjacent page move. Curl-animates when the
   // engine is present and ready; otherwise snaps. Jumps (goToPage/first/last) do
   // NOT route through here — a curl is a single-spread flip.
   const navigateAdjacent = useCallback(
     (direction: 'next' | 'previous') => {
+      if (maybeStartCoverOpen(direction)) return;
       const handled = curlNavHandlerRef.current?.(direction) ?? false;
       if (!handled) {
         dispatch({ type: direction === 'next' ? 'NEXT_SPREAD' : 'PREV_SPREAD' });
       }
     },
-    [dispatch],
+    [dispatch, maybeStartCoverOpen],
   );
+
+  // Clear coverOpening once we've actually left the cover (after the OPENING flip) — but
+  // NOT while a return is armed (the cover is intentionally pre-slotted at index 1).
+  useEffect(() => {
+    if (coverOpening && state.currentSpreadIndex !== 0 && !coverReturnArmedRef.current) {
+      setCoverOpening(false);
+    }
+  }, [coverOpening, state.currentSpreadIndex]);
+
+  // REVERSE arrival: the flip-back landed on the cover (pre-slotted at its slot). Once it
+  // has painted there, drop coverOpening → the isCurrent-gated transition slides it to
+  // centre (mirror of the opening). rAF ensures the slot frame paints before the slide.
+  useEffect(() => {
+    if (state.currentSpreadIndex === 0 && coverReturnArmedRef.current) {
+      coverReturnArmedRef.current = false;
+      window.requestAnimationFrame(() => {
+        setCoverOpening(false);
+        coverOpeningRef.current = false;
+      });
+    }
+  }, [state.currentSpreadIndex]);
 
   // Reduced-motion gate for the curl engine. When active, the curl overlay is not
   // rendered (see `showCurlOverlay`), so no curl handler registers and every
   // navigation — arrows, keyboard, wheel, gesture — snaps.
   const prefersReducedMotion = usePrefersReducedMotion();
+
+  // Book-open (cover centre + slide + fold) is active only in curl mode and with motion
+  // allowed — matching the curl overlay's gate. When off, the cover renders in the plain
+  // base layout and navigation snaps (no centring, no slide).
+  const bookOpenEnabled = enablePageCurl && !prefersReducedMotion;
+  bookOpenEnabledRef.current = bookOpenEnabled;
 
   // Leading-edge zoom throttle state — see useWheelRouter for the throttle logic.
   // Initialized to -Infinity so the FIRST wheel event is never swallowed by the
@@ -557,6 +666,7 @@ export function FlipbookProvider({
     isOverflowingRef,
     effectiveScaleRef,
     curlWheelHandlerRef,
+    coverOpenHandlerRef,
     lastZoomTimestampRef,
     dispatch,
   });
@@ -571,12 +681,20 @@ export function FlipbookProvider({
       registerCurlWheelHandler, registerCurlNavHandler,
       sourceStatus, sourceError,
       showLinks,
+      bookOpenEnabled,
+      coverOpening,
+      coverSettleVersion,
+      onCoverSettled: finishCoverOpen,
     }),
     [
       state, dispatch, source, spreads, effectiveScale, isOverflowing,
       registerCurlWheelHandler, registerCurlNavHandler,
       sourceStatus, sourceError,
       showLinks,
+      bookOpenEnabled,
+      coverOpening,
+      coverSettleVersion,
+      finishCoverOpen,
     ],
   );
 

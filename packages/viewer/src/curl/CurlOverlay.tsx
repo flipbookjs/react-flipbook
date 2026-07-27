@@ -29,7 +29,7 @@ interface CurlOverlayProps {
  *   4. useCurlRenderCallback — per-frame paint (receives all upstream values)
  */
 function CurlOverlay({ stageRef }: CurlOverlayProps) {
-  const { state, spreads } = useFlipbookContext();
+  const { state, spreads, coverSettleVersion } = useFlipbookContext();
   const { resolvedViewMode, currentSpreadIndex } = state;
 
   // PageRegistry read context. Caller guarantees presence; explicit error if absent.
@@ -98,6 +98,7 @@ function CurlOverlay({ stageRef }: CurlOverlayProps) {
     registryRead,
     registryVersion,
     resolvedViewMode,
+    remeasureKey: coverSettleVersion,
   });
 
   // 3. useCurlMode — receives FRESH overlayRect for gesture coords. No ref dance.

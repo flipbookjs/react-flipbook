@@ -41,6 +41,18 @@ export interface FlipbookContextValue {
    *  <Flipbook showLinks> → FlipbookProvider → here → PageRenderer.
    *  Default true. Consumers opt out with <Flipbook showLinks={false}>. */
   showLinks: boolean;
+  /** True when the book-open animation is active (curl enabled + motion allowed). When
+   *  false the cover renders in the plain base layout and navigation snaps. */
+  bookOpenEnabled?: boolean;
+  /** True while the cover is sliding from centre to its slot (before the page turn).
+   *  SpreadRenderer reads it to translate the cover; cleared once we leave the cover. */
+  coverOpening?: boolean;
+  /** Bumped when the cover reaches its slot. CurlOverlay feeds it to the overlay-rect
+   *  measurement as a re-measure trigger so the fold aligns to the slot, not the centre. */
+  coverSettleVersion?: number;
+  /** Called by SpreadRenderer when the cover's slide transition actually ends — the
+   *  confirmed "slide done" signal that releases the page turn. */
+  onCoverSettled?: () => void;
 }
 
 export const FlipbookContext = createContext<FlipbookContextValue | null>(null);

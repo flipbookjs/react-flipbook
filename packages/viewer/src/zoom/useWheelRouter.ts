@@ -38,6 +38,9 @@ export interface UseWheelRouterParams {
   /** Genuinely-nullable: initialized to null; useCurlMode toggles via
    *  registerCurlWheelHandler. */
   curlWheelHandlerRef: RefObject<((direction: 'next' | 'previous') => void) | null>;
+  /** Cover-open interceptor. Returns true if it consumed this navigation (started the
+   *  cover slide → the page turn fires later). When true, skip the curl handler. */
+  coverOpenHandlerRef?: RefObject<((direction: 'next' | 'previous') => boolean) | null>;
   dispatch: Dispatch<FlipbookAction>;
 }
 
@@ -48,6 +51,7 @@ export function useWheelRouter(params: UseWheelRouterParams): void {
     isOverflowingRef,
     effectiveScaleRef,
     curlWheelHandlerRef,
+    coverOpenHandlerRef,
     lastZoomTimestampRef,
     dispatch,
   } = params;
@@ -85,6 +89,9 @@ export function useWheelRouter(params: UseWheelRouterParams): void {
           return;
         case 'curl': {
           event.preventDefault();
+          // At the cover, let the cover-open consume the scroll (slide to slot, THEN
+          // turn). If it handles, skip the curl handler.
+          if (coverOpenHandlerRef?.current?.(route.direction)) return;
           // Discriminant guarantees handler is non-null: routeWheelEvent only
           // returns kind='curl' when hasCurlHandler was true, and refs don't
           // mutate during a synchronous event handler. Non-null assertion is

@@ -188,14 +188,16 @@ export const useCurlRenderCallback = (params: UseCurlRenderCallbackParams): void
     c2d.setTransform(dpr, 0, 0, dpr, 0, 0);
     c2d.clearRect(0, 0, overlayRect.width, overlayRect.height);
 
-    if (resolvedViewMode === 'dual-cover') {
+    // Only a genuine 2-page spread has a spine. A solo page (the cover, or a trailing
+    // odd page) has none — so no stray shadow is left behind when the cover slides.
+    if (resolvedViewMode === 'dual-cover' && spreadGeometry.currentPages.length === 2) {
       const sw = Math.max(8, overlayRect.width / 40);
       c2d.save();
       c2d.translate(overlayRect.width / 2, 0);
       drawSpineShadow(c2d, sw, overlayRect.height);
       c2d.restore();
     }
-  }, [snapshot.state, snapshot.committed, overlayRect, resolvedViewMode, degraded]);
+  }, [snapshot.state, snapshot.committed, overlayRect, resolvedViewMode, spreadGeometry, degraded]);
 };
 
 /**

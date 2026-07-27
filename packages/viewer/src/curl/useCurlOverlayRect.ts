@@ -23,6 +23,10 @@ export interface UseCurlOverlayRectParams {
   registryVersion: number;
   /** Resolved view mode — gates solo-spread expansion (dual-cover only). */
   resolvedViewMode: 'single' | 'dual-cover';
+  /** Opaque re-measure trigger. When it changes, the rect is re-measured even though no
+   *  other input did — used after the cover slides to its slot (a CSS transform doesn't
+   *  fire the ResizeObserver, so the cached rect would otherwise stay at the old centre). */
+  remeasureKey?: number;
 }
 
 /**
@@ -36,7 +40,7 @@ export interface UseCurlOverlayRectParams {
  * none of the current spread's pages have registered yet.
  */
 export const useCurlOverlayRect = (params: UseCurlOverlayRectParams): OverlayRect | null => {
-  const { stageRef, spreadGeometry, registryRead, registryVersion, resolvedViewMode } = params;
+  const { stageRef, spreadGeometry, registryRead, registryVersion, resolvedViewMode, remeasureKey } = params;
   const [overlayRect, setOverlayRect] = useState<OverlayRect | null>(null);
 
   const remeasure = useCallback((): void => {
@@ -97,6 +101,7 @@ export const useCurlOverlayRect = (params: UseCurlOverlayRectParams): OverlayRec
     registryRead,
     registryVersion,
     resolvedViewMode,
+    remeasureKey,
   ]);
 
   useLayoutEffect(() => {
