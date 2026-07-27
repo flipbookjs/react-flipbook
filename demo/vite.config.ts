@@ -39,5 +39,10 @@ export default defineConfig({
       },
     },
   ],
+  // Don't pre-bundle the workspace viewer — otherwise Vite caches its built `dist`
+  // in node_modules/.vite and won't pick up rebuilds without a --force restart.
+  // Excluded => served directly, so `npm -w packages/viewer run build` + browser
+  // refresh always reflects the latest viewer build.
+  optimizeDeps: { exclude: ['@flipbookjs/react-viewer'] },
   publicDir: resolve(import.meta.dirname, '../../../test-pdfs'),
 });
