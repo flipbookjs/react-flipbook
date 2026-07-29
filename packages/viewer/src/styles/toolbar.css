@@ -50,6 +50,10 @@
   font-size: 0.875rem;
   /* Don't let toolbar focus rings bleed outside the rounded card */
   position: relative;
+  /* Lift the toolbar (and its button tooltips) above the stage content — which
+     otherwise paints over the top bar's downward tooltip. Scoped inside
+     .fbjs-root's isolate context, so it can't collide with consumer chrome. */
+  z-index: 10;
   /* Establish the container for the responsive @container rules below. The
      toolbar IS the container we query — its OWN width drives layout decisions.
      Works correctly when the toolbar is nested in a narrow sidebar even if
@@ -112,6 +116,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  position: relative;   /* anchor for the ::after tooltip below */
   width: 2.5rem;
   height: 2.5rem;
   padding: 0.5rem;
@@ -147,6 +152,45 @@
 
 .fbjs-toolbar__button svg {
   display: block;
+}
+
+/* --- Notion-style button tooltips ----------------------------------------
+   A small dark bubble showing each button's own aria-label, on hover / keyboard
+   focus. Pure CSS (::after + attr(aria-label)) — every toolbar button gets it
+   with no markup or JS. Not clipped: the toolbar sets no overflow, and its
+   z-index (above) lifts the bubble over the stage. A consumer passing a native
+   `title` should drop it to avoid a doubled tooltip. */
+.fbjs-toolbar__button[aria-label]::after {
+  content: attr(aria-label);
+  position: absolute;
+  top: calc(100% + 0.375rem);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1;
+  pointer-events: none;
+  white-space: nowrap;
+  background: var(--fbjs-tooltip-bg, #191919);
+  color: var(--fbjs-tooltip-fg, #f5f5f5);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.35;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.3125rem;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.16), 0 0 0 1px rgb(0 0 0 / 0.04);
+  opacity: 0;
+  transition: opacity 110ms ease;
+}
+
+.fbjs-toolbar__button[aria-label]:hover::after,
+.fbjs-toolbar__button[aria-label]:focus-visible::after {
+  opacity: 1;
+  transition-delay: 400ms; /* Notion-like pause before it appears */
+}
+
+/* Bottom bar hugs the viewer's lower edge — open its tooltips upward instead. */
+.fbjs-toolbar__bar--bottom .fbjs-toolbar__button[aria-label]::after {
+  top: auto;
+  bottom: calc(100% + 0.375rem);
 }
 
 .fbjs-toolbar__readout {

@@ -35,6 +35,8 @@
   --fbjs-toolbar-bg: #ffffff;
   --fbjs-toolbar-fg: #1f2937;
   --fbjs-toolbar-fg-muted: #9ca3af; /* CMS-aligned icon stroke color — lighter than toolbar-fg so icons read as chrome, not content */
+  --fbjs-tooltip-bg: #191919;       /* Notion-style dark tooltip bubble */
+  --fbjs-tooltip-fg: #f5f5f5;
   --fbjs-toolbar-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
   --fbjs-popover-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   --fbjs-border: #e5e7eb;
@@ -75,6 +77,8 @@
   --fbjs-toolbar-bg: #ffffff;
   --fbjs-toolbar-fg: #1f2937;
   --fbjs-toolbar-fg-muted: #9ca3af;
+  --fbjs-tooltip-bg: #191919;
+  --fbjs-tooltip-fg: #f5f5f5;
   --fbjs-toolbar-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
   --fbjs-popover-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   --fbjs-border: #e5e7eb;
@@ -97,6 +101,8 @@
   --fbjs-toolbar-bg: #1e293b;
   --fbjs-toolbar-fg: #f8fafc;
   --fbjs-toolbar-fg-muted: #94a3b8;
+  --fbjs-tooltip-bg: #f4f4f5;        /* inverted in dark mode — light bubble, dark text */
+  --fbjs-tooltip-fg: #18181b;
   --fbjs-toolbar-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
   --fbjs-popover-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
   --fbjs-border: #334155;
