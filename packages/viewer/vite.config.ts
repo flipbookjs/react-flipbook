@@ -26,7 +26,10 @@ export default defineConfig({
       cssFileName: 'styles',
     },
     rolldownOptions: {
-      external: ['react', 'react-dom', 'react/jsx-runtime'],
+      // pdfjs-dist is a peer, not a bundled dependency: the consumer's install is
+      // what runs, so their security patches apply without a viewer release. The
+      // pattern also covers deep imports (build/, legacy/).
+      external: ['react', 'react-dom', 'react/jsx-runtime', /^pdfjs-dist(\/|$)/],
       // Manual chunk grouping forces shared internal modules (the 6A hook
       // layer + 6B's icons/labels/composeHandlers/useToolbarPart) into a
       // single shared chunk. Without this, rolldown may inline shared code

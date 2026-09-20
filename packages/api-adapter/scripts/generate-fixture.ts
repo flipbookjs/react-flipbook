@@ -103,13 +103,16 @@ async function convertLinkAnnotation(
   if ((ann as any).actions) return null;
   if ((ann as any).action != null) return null;
   if ((ann as any).attachment) return null;
+  if ((ann as any).attachmentId) return null;
   if ((ann as any).setOCGState) return null;
   if ((ann as any).resetForm) return null;
 
   const viewport = page.getViewport({ scale: 1.0 });
-  const raw = viewport.convertToViewportRectangle(ann.rect);
-  if (!Array.isArray(raw) || raw.length < 4) return null;
-  const [x1, y1, x2, y2] = raw;
+  if (!Array.isArray(ann.rect) || ann.rect.length < 4) return null;
+  const [x1, y1, x2, y2] = [
+    ...viewport.convertToViewportPoint(ann.rect[0], ann.rect[1]),
+    ...viewport.convertToViewportPoint(ann.rect[2], ann.rect[3]),
+  ];
   if (![x1, y1, x2, y2].every(Number.isFinite)) return null;
   const rect: [number, number, number, number] = [
     Math.min(x1, x2), Math.min(y1, y2),
@@ -175,8 +178,9 @@ async function main(): Promise<void> {
   console.log(`[generate-fixture] Source PDF: ${SOURCE_PDF}`);
   console.log(`[generate-fixture] Output dir: ${FIXTURE_DIR}`);
 
-  // pdf.js v5 legacy build is the Node-friendly entry. The browser/worker
-  // entries assume a window global.
+  // pdf.js legacy build is the Node-friendly entry. The browser/worker entries
+  // assume a window global (and the browser build needs Uint8Array.prototype.toHex,
+  // which Node does not have).
   const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
 
   const pdfBytes = new Uint8Array(readFileSync(SOURCE_PDF));

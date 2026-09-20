@@ -1,7 +1,8 @@
 import * as pdfjs from 'pdfjs-dist';
-import type { PDFDocumentProxy } from 'pdfjs-dist';
+import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist';
 import type { PageSource, LinkAnnotation } from '../types/PageSource';
 import { configurePdfWorker } from './configurePdfWorker';
+import { devWarn } from '../core/devWarn';
 
 const DEFAULT_ALLOWED_SCHEMES = new Set(['http', 'https', 'mailto', 'tel']);
 // Fence: consumers CANNOT re-enable these via additionalLinkSchemes.
@@ -43,7 +44,21 @@ function sanitizeAdditionalSchemes(
 const PDFJS_CDN_BASE = 'https://cdn.jsdelivr.net/npm/pdfjs-dist';
 
 export interface PdfjsSourceOptions {
-  /** Custom worker URL. If omitted, uses bundled asset URL (see configurePdfWorker). */
+  /**
+   * URL of the pdf.js worker. Required unless `pdfjs.GlobalWorkerOptions.workerSrc`
+   * is already set (e.g. by a `configurePdfWorker()` call at app startup); `init()`
+   * throws when neither is present. Must come from the same pdfjs-dist version as
+   * the installed peer — pdf.js rejects a version mismatch.
+   *
+   * Note that this writes pdf.js's process-wide `GlobalWorkerOptions`, which pdf.js
+   * reads when it creates the worker for each document. Two viewers with different
+   * `workerSrc` values do not get one worker each: the value set most recently wins
+   * for documents opened after it.
+   *
+   * This is trusted configuration, never user input: for a cross-origin URL pdf.js
+   * interpolates it into a generated module (`await import("<url>")`) and runs that
+   * as the worker, so whatever it points at executes with the worker's privileges.
+   */
   workerSrc?: string;
   /** Password for protected PDFs. */
   password?: string;
@@ -110,6 +125,10 @@ export interface PdfjsSourceOptions {
 
 export class PdfjsSource implements PageSource {
   private doc: PDFDocumentProxy | null = null;
+  // pdf.js 6 removed PDFDocumentProxy.destroy(); the loading task owns teardown.
+  // Assigned as soon as the task exists so dispose() can cancel a download and
+  // parse that is still running.
+  private loadingTask: PDFDocumentLoadingTask | null = null;
   private pageSizes: Array<{ width: number; height: number }> = [];
   private url: string | URL | Uint8Array;
   private options: PdfjsSourceOptions;
@@ -121,7 +140,11 @@ export class PdfjsSource implements PageSource {
   }
 
   async init(): Promise<void> {
-    if (this.doc) throw new Error('PdfjsSource already initialized');
+    // `doc` is null for the whole of an in-flight load, so checking it alone would
+    // let a second init() overwrite `loadingTask` and orphan the first download.
+    if (this.doc || this.loadingTask) {
+      throw new Error('PdfjsSource already initialized');
+    }
 
     const generation = ++this.initGeneration;
 
@@ -144,26 +167,47 @@ export class PdfjsSource implements PageSource {
       iccUrl: this.options.iccUrl ?? `${PDFJS_CDN_BASE}@${pdfjs.version}/iccs/`,
     });
 
-    const doc = await loadingTask.promise;
+    // Hold the task immediately: dispose() destroys it to cancel an in-progress
+    // download and parse. The entry guard above rejects a second init() while this
+    // is set, so the field always refers to the one load in flight.
+    this.loadingTask = loadingTask;
 
-    // dispose() may have been called while we awaited — bail and clean up
-    if (this.initGeneration !== generation) {
-      doc.destroy();
-      return;
-    }
+    let doc: PDFDocumentProxy;
+    let pageSizes: Array<{ width: number; height: number }>;
+    try {
+      doc = await loadingTask.promise;
 
-    const pageSizes: Array<{ width: number; height: number }> = [];
-    for (let i = 1; i <= doc.numPages; i++) {
-      const page = await doc.getPage(i);
+      // dispose() may have been called while we awaited — bail and clean up.
+      // destroy() is idempotent, so this is safe even if dispose() got there first.
       if (this.initGeneration !== generation) {
-        doc.destroy();
+        this.destroyTask(loadingTask);
         return;
       }
-      const viewport = page.getViewport({ scale: 1.0 });
-      pageSizes.push({
-        width: viewport.width,
-        height: viewport.height,
-      });
+
+      pageSizes = [];
+      for (let i = 1; i <= doc.numPages; i++) {
+        const page = await doc.getPage(i);
+        if (this.initGeneration !== generation) {
+          this.destroyTask(loadingTask);
+          return;
+        }
+        const viewport = page.getViewport({ scale: 1.0 });
+        pageSizes.push({
+          width: viewport.width,
+          height: viewport.height,
+        });
+      }
+    } catch (err) {
+      // A destroyed task rejects its promise with "Loading aborted" and makes
+      // getPage() throw. When our generation is stale that IS the cancellation we
+      // asked for, so exit quietly — and leave `loadingTask` alone, since dispose()
+      // has already cleared it and a newer init() may own it by now.
+      if (this.initGeneration !== generation) return;
+      // Genuine failure: release the slot so the caller can retry, and free the
+      // worker. destroy() after a failed load is safe.
+      this.loadingTask = null;
+      this.destroyTask(loadingTask);
+      throw err;
     }
 
     // Commit atomically — only after all async work succeeded for this generation
@@ -212,17 +256,17 @@ export class PdfjsSource implements PageSource {
 
     const viewport = page.getViewport({ scale: 1.0 });
 
-    // Version-drift guard: `convertToViewportRectangle` was added to pdfjs's
-    // viewport helper before v5.0. If a consumer's peer-dep resolution ever
-    // lands a version missing this method, EVERY link on EVERY page drops
-    // silently as `bad-rect-shape` — an unhelpful diagnostic when the actual
-    // root cause is version incompatibility. Fail fast with a distinctive
-    // warn instead of masquerading as data corruption.
-    if (typeof viewport?.convertToViewportRectangle !== 'function') {
+    // Version-drift guard: `convertToViewportPoint` is what pdf.js 6 exposes for
+    // coordinate conversion. If a consumer's peer-dep resolution ever lands a
+    // version missing it, EVERY link on EVERY page drops silently as
+    // `bad-rect-shape` — an unhelpful diagnostic when the actual root cause is
+    // version incompatibility. Fail fast with a distinctive warn instead of
+    // masquerading as data corruption.
+    if (typeof viewport?.convertToViewportPoint !== 'function') {
       if (process.env.NODE_ENV !== 'production') {
         console.warn(
-          `[flipbook] pdfjs viewport is missing convertToViewportRectangle() ` +
-          `— pdfjs peer version incompatible with @flipbookjs/react-viewer ` +
+          `[flipbook] pdfjs viewport is missing convertToViewportPoint() ` +
+          `— @flipbookjs/react-viewer requires pdfjs-dist >=6.2.108 <7 ` +
           `(peer version: ${pdfjs.version}). No links rendered on page ${index}.`,
         );
       }
@@ -266,6 +310,10 @@ export class PdfjsSource implements PageSource {
         noteDrop(`action:${label}`, a); return false;
       }
       if (a.attachment) { noteDrop('attachment', a); return false; }
+      // v6 splits the attachment payload: `attachmentId` is always set, while
+      // `attachment` is only populated when the document's attachment table
+      // resolves the id. The filter rejects recognized payloads by shape.
+      if (a.attachmentId) { noteDrop('attachment-id', a); return false; }
       if (a.setOCGState) { noteDrop('setOCGState', a); return false; }
       if (a.resetForm) { noteDrop('resetForm', a); return false; }
       return true;
@@ -309,11 +357,18 @@ export class PdfjsSource implements PageSource {
     noteDrop: (reason: string, ann?: any) => void,
   ): Promise<LinkAnnotation | null> {
     try {
-      const raw = viewport.convertToViewportRectangle(ann.rect);
-      if (!Array.isArray(raw) || raw.length < 4) {
+      // pdf.js 6 removed convertToViewportRectangle. Two point conversions apply
+      // exactly the transform it applied — verified identical across 1,622 link
+      // rects at rotations 0/90/180/270. The shape check moves to the INPUT rect,
+      // which is what could be malformed now that we build the output ourselves.
+      const r = ann.rect;
+      if (!Array.isArray(r) || r.length < 4) {
         noteDrop('bad-rect-shape', ann); return null;
       }
-      const [x1, y1, x2, y2] = raw;
+      const [x1, y1, x2, y2] = [
+        ...viewport.convertToViewportPoint(r[0], r[1]),
+        ...viewport.convertToViewportPoint(r[2], r[3]),
+      ];
       if (![x1, y1, x2, y2].every(Number.isFinite)) {
         noteDrop('rect-non-finite', ann); return null;
       }
@@ -445,7 +500,10 @@ export class PdfjsSource implements PageSource {
 
   dispose(): void {
     this.initGeneration++; // invalidate any in-flight init
-    this.doc?.destroy();
+    // Cancels an in-flight load as well as tearing down a committed document:
+    // without this a large PDF keeps downloading and parsing after unmount.
+    if (this.loadingTask) this.destroyTask(this.loadingTask);
+    this.loadingTask = null;
     this.doc = null;
     this.pageSizes = [];
     // Fail loud: reject any queued renders (Rule 1 — no hanging promises)
@@ -456,6 +514,17 @@ export class PdfjsSource implements PageSource {
     for (const entry of queue) {
       entry.reject(disposedError);
     }
+  }
+
+  /**
+   * pdf.js teardown is async. A rejection here is a "should never happen" fault
+   * rather than something a caller can act on, so it surfaces through devWarn
+   * instead of becoming an unhandled rejection (Rule 1: fail loud).
+   */
+  private destroyTask(task: PDFDocumentLoadingTask): void {
+    task.destroy().catch((err) => {
+      devWarn('[flipbook] pdfjs loadingTask.destroy() rejected during teardown:', err);
+    });
   }
 
   // --- Concurrency limiter (architecture review #6) ---

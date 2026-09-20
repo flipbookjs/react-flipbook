@@ -46,14 +46,19 @@ Built for product documentation portals, magazine + brochure CMSes, e-book apps,
 Install the package and its peer dependencies:
 
 ```bash
-npm install @flipbookjs/react-viewer@1.0.0 pdfjs-dist react react-dom
+npm install @flipbookjs/react-viewer pdfjs-dist@^6.2.108 react react-dom
 ```
 
 Render the viewer:
 
 ```tsx
-import { Flipbook } from '@flipbookjs/react-viewer';
+import { Flipbook, configurePdfWorker } from '@flipbookjs/react-viewer';
+import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import '@flipbookjs/react-viewer/styles.css';
+
+// Once, at app startup: pdf.js parses in a worker, and the worker must come from
+// the pdfjs-dist version you installed.
+configurePdfWorker(workerSrc);
 
 export default function Reader() {
   return (
@@ -66,6 +71,11 @@ export default function Reader() {
 }
 ```
 
+> The `?url` suffix is Vite's. In TypeScript it needs `vite/client` types in scope —
+> Vite's own scaffold provides them via `src/vite-env.d.ts`. With any other bundler,
+> copy `pdfjs-dist/build/pdf.worker.min.mjs` into your static assets and pass that URL
+> instead: `configurePdfWorker('/pdf.worker.min.mjs')`.
+
 Toolbar, page navigation, zoom, fullscreen, print, download, thumbnails, and the page curl animation all render by default.
 
 For Next.js, Remix, Gatsby, and other SSR frameworks, see [SSR integration in MIGRATION.md §13](packages/viewer/MIGRATION.md#13-ssr--nextjs--remix-integration).
@@ -74,7 +84,7 @@ For Next.js, Remix, Gatsby, and other SSR frameworks, see [SSR integration in MI
 
 ### Ready out of the box
 
-- **`<Flipbook url="..." />` drops in a complete viewer** — toolbar, navigation, zoom, fullscreen, print, download, thumbnails, theme. No setup, no plugins, no glue.
+- **`<Flipbook url="..." />` drops in a complete viewer** — toolbar, navigation, zoom, fullscreen, print, download, thumbnails, theme. One line of setup (register the pdf.js worker), no plugins, no glue.
 - **Page-curl animation** — opt in with `enablePageCurl`; tactile dual-page interaction in dual-cover mode.
 - **Built-in toolbar** — every action accessible via keyboard with WAI-ARIA roving-tabindex; `aria-pressed` on toggles; reduced-motion respected on animated parts.
 - **Thumbnail panel** — virtualized horizontal scroll, click-to-navigate, slide animation that defers to `prefers-reduced-motion`.
@@ -103,7 +113,7 @@ For Next.js, Remix, Gatsby, and other SSR frameworks, see [SSR integration in MI
 
 - [React](https://react.dev/) 18+ — `useSyncExternalStore` snapshot store for SSR-safe state.
 - [TypeScript](https://www.typescriptlang.org/) — strict-mode typed throughout.
-- [pdf.js](https://mozilla.github.io/pdf.js/) — Mozilla's PDF renderer (peer dependency, `^5.6.0`).
+- [pdf.js](https://mozilla.github.io/pdf.js/) — Mozilla's PDF renderer (peer dependency, `>=6.2.108 <7`; supplied by your app, not bundled).
 - [Vite](https://vite.dev/) — bundler + dev server for the package and the demo app.
 - [vitest](https://vitest.dev/) — test runner.
 
@@ -115,7 +125,7 @@ For Next.js, Remix, Gatsby, and other SSR frameworks, see [SSR integration in MI
 What you get:
 
 - **Sub-second first paint on every device** — pre-rendered load from CDN, no pdf.js boot.
-- **Skip the pdf.js bundle** — pre-rendered sources don't load it.
+- **No pdf.js parsing or rasterization** — pages arrive as images, so the PDF is never downloaded, parsed or rendered in the browser.
 - **Search-ready out of the box** 
 - **Constant client memory** — lazy fetch per page, even for 1,000-page documents.
 - **Render once, serve forever** — every viewer mount hits the same warm CDN cache, regardless of user device or location.
@@ -137,7 +147,7 @@ import '@flipbookjs/react-viewer/styles.css';
 |                    | Default (pdf.js)                    | publi pre-rendered                             |
 |--------------------|-------------------------------------|------------------------------------------------|
 | Time to first page | Boot pdf.js + download PDF + render | Single CDN fetch of a static page image        |
-| Bundle weight      | ~2 MB pdf.js worker per load        | Just the viewer + image bytes per page         |
+| Bundle weight      | pdf.js + its worker, from your own install | Viewer + the pdf.js library; no worker fetch and no client-side PDF processing |
 | Low-end mobile     | CPU-bound rasterization, can stall  | Plain images — runs everywhere                 |
 | Text search        | Per-page extraction in the browser  | Pre-indexed server-side, returned with pages   |
 | Caching            | Per-client browser cache            | Shared CDN cache across all viewers + devices  |

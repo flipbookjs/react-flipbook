@@ -33,6 +33,10 @@ export interface CreateFlipbookSourceOptions {
    * Use `pdfjs.withCredentials: true` if you need credentials sent with
    * the PDF.js fetch — that's the PDF.js-side equivalent of the
    * top-level `credentials` option above.
+   *
+   * The fallback path needs a pdf.js worker: set `pdfjs.workerSrc` here, or call
+   * `configurePdfWorker()` once at app startup. Pre-rendered bundles never construct
+   * a `PdfjsSource`, so they need neither.
    */
   pdfjs?: PdfjsSourceOptions;
 }

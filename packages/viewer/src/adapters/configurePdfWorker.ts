@@ -1,45 +1,40 @@
 import * as pdfjs from 'pdfjs-dist';
 
-let workerConfigured = false;
-
 /**
- * Configure the pdfjs web worker.
+ * Register the pdf.js web worker.
  *
- * Default: bundled asset URL via import.meta.url resolution.
- * Override: pass a custom workerSrc URL.
+ * Resolution order:
+ * 1. `workerSrc` argument (also reachable as `PdfjsSourceOptions.workerSrc`) — wins.
+ * 2. An already-set `pdfjs.GlobalWorkerOptions.workerSrc` — respected, never
+ *    overwritten. Since pdfjs-dist is a peer, that global belongs to the consumer's
+ *    application, which may configure pdf.js for its own use.
+ * 3. Neither — throws. There is no default: the worker is required for every
+ *    document, and pdf.js's fallback path re-imports the same URL, so a wrong or
+ *    unreachable default fails hard rather than degrading.
  *
- * NOTE: The default strategy is a PLACEHOLDER. Week 0 Experiment 3
- * will validate whether this works from a pre-built library bundle.
- * If not, this will change to either:
- * - True blob URL inlining (worker source embedded as string)
- * - User-required configuration (externalize pdfjs-dist)
+ * The worker MUST come from the same pdfjs-dist version as the library; pdf.js
+ * compares the two and throws `The API version "X" does not match the Worker version
+ * "Y"`.
+ *
+ * Environment note: under Node, pdf.js's own static initializer runs
+ * `GlobalWorkerOptions.workerSrc ||= "./pdf.worker.mjs"`, and its `isNodeJS` check is
+ * true whenever `process` exists — including jsdom test environments. Step 3 is
+ * therefore a browser-path guard.
  */
 export function configurePdfWorker(workerSrc?: string): void {
-  // Explicit workerSrc always wins — allows overriding a previous default.
-  // Calling without args after the default is set is a no-op.
-  if (workerConfigured && !workerSrc) return;
-
   if (workerSrc) {
-    // User-provided worker URL (advanced usage).
-    // Must be called before the first PdfjsSource.init().
     pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
-  } else {
-    // Default: resolve worker as a bundled asset.
-    // import.meta.url tells the bundler to copy pdf.worker.min.mjs
-    // to the output directory and rewrite this URL to point to it.
-    //
-    // This works when:
-    //   - The user's bundler processes our source (Webpack 5, Vite)
-    // This breaks when:
-    //   - We ship a pre-built bundle (URL baked in at our build time)
-    //   - Next.js SSR (import.meta.url doesn't exist on the server)
-    //
-    // Week 0 will determine the real approach.
-    pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-      'pdfjs-dist/build/pdf.worker.min.mjs',
-      import.meta.url,
-    ).toString();
+    return;
   }
 
-  workerConfigured = true;
+  if (pdfjs.GlobalWorkerOptions.workerSrc) return;
+
+  throw new Error(
+    '[flipbook] pdf.js worker is not configured. Pass a URL to the worker that ships ' +
+    'with your installed pdfjs-dist — e.g. ' +
+    "import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url' — as " +
+    'configurePdfWorker(workerSrc) at app startup, or as ' +
+    '<Flipbook pdfjsOptions={{ workerSrc }} />. Setting ' +
+    'pdfjs.GlobalWorkerOptions.workerSrc yourself also works.',
+  );
 }

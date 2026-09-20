@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { PdfjsSource } from '../adapters/PdfjsSource';
 
 // Mock pdfjs-dist — renderPage tests must use mock canvases in Node (Week 0 finding)
@@ -15,30 +15,36 @@ vi.mock('pdfjs-dist', () => {
       height: 792 * scale,
       // Default identity — tests that need rotation/flip semantics override
       // getViewport via mockReturnValueOnce to return a shape with a specific
-      // convertToViewportRectangle behavior.
-      convertToViewportRectangle: vi.fn((rect: number[]) => rect),
+      // convertToViewportPoint behavior.
+      convertToViewportPoint: vi.fn((x: number, y: number) => [x, y]),
     })),
     render: vi.fn(() => mockRenderTask),
     getAnnotations: vi.fn(() => Promise.resolve([])),
   };
 
+  // pdf.js 6: the document proxy has no destroy(); the loading task owns teardown.
   const mockDoc = {
     numPages: 3,
     getPage: vi.fn(() => Promise.resolve(mockPage)),
-    destroy: vi.fn(),
     getDestination: vi.fn(),
     getPageIndex: vi.fn(),
   };
 
+  const mockLoadingTask = {
+    promise: Promise.resolve(mockDoc),
+    // Returns a promise: destroyTask() calls .catch() on the result.
+    destroy: vi.fn(() => Promise.resolve()),
+  };
+
   return {
-    getDocument: vi.fn(() => ({
-      promise: Promise.resolve(mockDoc),
-    })),
-    GlobalWorkerOptions: { workerSrc: '' },
+    getDocument: vi.fn(() => mockLoadingTask),
+    // Non-empty: configurePdfWorker throws when no worker is resolvable.
+    GlobalWorkerOptions: { workerSrc: '/test-worker.mjs' },
     // Runtime CDN-URL defaults in PdfjsSource.init() interpolate `pdfjs.version`.
-    version: '5.6.205',
+    version: '6.3.289',
     _mockDoc: mockDoc,
     _mockPage: mockPage,
+    _mockLoadingTask: mockLoadingTask,
     _mockRenderTask: mockRenderTask,
   };
 });
@@ -152,16 +158,19 @@ describe('PdfjsSource', () => {
     const mockDoc = (pdfjs as any)._mockDoc;
 
     let resolveInit!: () => void;
+    const destroy = vi.fn(() => Promise.resolve());
     vi.mocked(pdfjs.getDocument).mockReturnValueOnce({
       promise: new Promise<any>((resolve) => {
         resolveInit = () => resolve(mockDoc);
       }),
+      destroy,
     } as any);
 
     const initPromise = source.init();
 
     // Dispose while init is awaiting loadingTask.promise
     source.dispose();
+    expect(destroy).toHaveBeenCalled();   // dispose() cancels the in-flight load
 
     // First init's promise resolves after dispose — generation check should bail
     resolveInit();
@@ -170,6 +179,63 @@ describe('PdfjsSource', () => {
     expect(source.getPageCount()).toBe(0); // doc was not committed
 
     // Re-init should succeed (simulates Strict Mode remount)
+    await source.init();
+    expect(source.getPageCount()).toBe(3);
+  });
+
+  it('treats a cancelled in-flight load as a normal exit', async () => {
+    const pdfjs = await import('pdfjs-dist');
+    let rejectInit!: (err: Error) => void;
+    const destroy = vi.fn(() => Promise.resolve());
+    vi.mocked(pdfjs.getDocument).mockReturnValueOnce({
+      promise: new Promise<any>((_resolve, reject) => {
+        rejectInit = reject;
+      }),
+      destroy,
+    } as any);
+
+    const initPromise = source.init();
+    source.dispose();
+    expect(destroy).toHaveBeenCalled();
+
+    // pdfjs rejects a destroyed task's promise; a stale generation makes that our
+    // own cancellation, so init() resolves rather than surfacing an error.
+    rejectInit(new Error('Loading aborted'));
+    await expect(initPromise).resolves.toBeUndefined();
+    expect(source.getPageCount()).toBe(0);
+  });
+
+  it('rejects a second init() while the first is still in flight', async () => {
+    const pdfjs = await import('pdfjs-dist');
+    const mockDoc = (pdfjs as any)._mockDoc;
+
+    let settle!: (doc: any) => void;
+    vi.mocked(pdfjs.getDocument).mockReturnValueOnce({
+      promise: new Promise<any>((resolve) => {
+        settle = resolve;
+      }),
+      destroy: vi.fn(() => Promise.resolve()),
+    } as any);
+
+    const first = source.init();
+    // Guard must consider the in-flight task, not just the committed doc —
+    // otherwise the second call overwrites `loadingTask` and orphans the download.
+    await expect(source.init()).rejects.toThrow('PdfjsSource already initialized');
+
+    settle(mockDoc);
+    await first;
+    expect(source.getPageCount()).toBe(3);
+  });
+
+  it('allows a retry after a failed init()', async () => {
+    const pdfjs = await import('pdfjs-dist');
+    vi.mocked(pdfjs.getDocument).mockReturnValueOnce({
+      promise: Promise.reject(new Error('InvalidPDFException')),
+      destroy: vi.fn(() => Promise.resolve()),
+    } as any);
+
+    await expect(source.init()).rejects.toThrow('InvalidPDFException');
+    // The failure path clears `loadingTask`, so the guard doesn't block a retry.
     await source.init();
     expect(source.getPageCount()).toBe(3);
   });
@@ -246,7 +312,7 @@ describe('PdfjsSource — getLinks', () => {
     mockPage.getViewport.mockImplementation(({ scale }: { scale: number }) => ({
       width: 612 * scale,
       height: 792 * scale,
-      convertToViewportRectangle: vi.fn((rect: number[]) => rect),
+      convertToViewportPoint: vi.fn((x: number, y: number) => [x, y]),
     }));
     mockDoc.getDestination.mockReset();
     mockDoc.getPageIndex.mockReset();
@@ -258,7 +324,7 @@ describe('PdfjsSource — getLinks', () => {
     return src;
   }
 
-  it('(a) returns external URL link with rect from convertToViewportRectangle', async () => {
+  it('(a) returns external URL link with rect from convertToViewportPoint', async () => {
     const pdfjs = await import('pdfjs-dist');
     const mockPage = (pdfjs as any)._mockPage;
     const src = await initSource();
@@ -266,7 +332,7 @@ describe('PdfjsSource — getLinks', () => {
     // getLinks(0), not by the init loop.
     mockPage.getViewport.mockReturnValueOnce({
       width: 612, height: 792,
-      convertToViewportRectangle: () => [100, 640, 200, 690],
+      convertToViewportPoint: (x: number, y: number) => (y === 100 ? [100, 640] : [200, 690]),
     });
     mockPage.getAnnotations.mockResolvedValueOnce([
       { subtype: 'Link', rect: [100, 100, 200, 150], url: 'https://example.com' },
@@ -313,10 +379,10 @@ describe('PdfjsSource — getLinks', () => {
     // Simulate Rotate 180: convertToViewportRectangle returns [x2, y2, x1, y1].
     mockPage.getViewport.mockReturnValueOnce({
       width: 612, height: 792,
-      convertToViewportRectangle: () => [200, 200, 100, 100],
+      convertToViewportPoint: (x: number) => (x === 0 ? [200, 200] : [100, 100]),
     });
     mockPage.getAnnotations.mockResolvedValueOnce([
-      { subtype: 'Link', rect: [0, 0, 0, 0], url: 'https://example.com' },
+      { subtype: 'Link', rect: [0, 0, 1, 1], url: 'https://example.com' },
     ]);
     const links = await src.getLinks(0);
     expect(links[0].rect).toEqual([100, 100, 200, 200]);
@@ -374,6 +440,19 @@ describe('PdfjsSource — getLinks', () => {
     expect(links).toEqual([]);
   });
 
+  it('(f2) drops attachment annotations that only carry attachmentId', async () => {
+    const pdfjs = await import('pdfjs-dist');
+    const mockPage = (pdfjs as any)._mockPage;
+    // pdfjs 6 always sets `attachmentId`; `attachment` is populated only when the
+    // document's attachment table resolves the id.
+    mockPage.getAnnotations.mockResolvedValueOnce([
+      { subtype: 'Link', rect: [0, 0, 10, 10], attachmentId: 'att-1' },
+    ]);
+    const src = await initSource();
+    const links = await src.getLinks(0);
+    expect(links).toEqual([]);
+  });
+
   it('(g) rejects with AbortError when signal fires', async () => {
     const pdfjs = await import('pdfjs-dist');
     const mockPage = (pdfjs as any)._mockPage;
@@ -398,8 +477,8 @@ describe('PdfjsSource — getLinks', () => {
     // B → zero-area. Both paths exercised in one getLinks call.
     mockPage.getViewport.mockReturnValueOnce({
       width: 612, height: 792,
-      convertToViewportRectangle: (r: number[]) =>
-        r[0] === 1 ? [NaN, 0, 10, 10] : [5, 5, 5, 5],
+      convertToViewportPoint: (x: number) =>
+        x === 1 ? [NaN, 0] : x === 2 ? [10, 10] : [5, 5],
     });
     mockPage.getAnnotations.mockResolvedValueOnce([
       { subtype: 'Link', rect: [1, 1, 2, 2], url: 'https://a.example' },
@@ -479,15 +558,15 @@ describe('PdfjsSource — getLinks', () => {
     expect(mockDoc.getPage.mock.calls.length).toBe(callsBefore);  // no new getPage calls
   });
 
-  it('(l) returns [] with distinctive dev warn when viewport lacks convertToViewportRectangle', async () => {
+  it('(l) returns [] with distinctive dev warn when viewport lacks convertToViewportPoint', async () => {
     const pdfjs = await import('pdfjs-dist');
     const mockPage = (pdfjs as any)._mockPage;
     const src = await initSource();
-    // Override AFTER init: return a viewport MISSING convertToViewportRectangle.
-    // Simulates a pdfjs peer-dep version older than v5.0.
+    // Override AFTER init: return a viewport MISSING convertToViewportPoint.
+    // Simulates a pdfjs peer-dep version older than 6.x.
     mockPage.getViewport.mockReturnValueOnce({
       width: 612, height: 792,
-      // convertToViewportRectangle intentionally omitted
+      // convertToViewportPoint intentionally omitted
     });
     mockPage.getAnnotations.mockResolvedValueOnce([
       { subtype: 'Link', rect: [0, 0, 10, 10], url: 'https://example.com' },
@@ -498,7 +577,7 @@ describe('PdfjsSource — getLinks', () => {
 
     expect(links).toEqual([]);
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('pdfjs viewport is missing convertToViewportRectangle'),
+      expect.stringContaining('pdfjs viewport is missing convertToViewportPoint'),
     );
     warnSpy.mockRestore();
   });
@@ -517,5 +596,40 @@ describe('PdfjsSource — getLinks', () => {
       expect.stringContaining('getAnnotations() failed for page 0'),
     );
     warnSpy.mockRestore();
+  });
+});
+
+describe('PdfjsSource — worker resolution', () => {
+  // configurePdfWorker: explicit argument wins → an existing global is respected →
+  // neither set throws. The module mock's GlobalWorkerOptions stands in for the
+  // consumer's pdf.js global.
+  afterEach(async () => {
+    const pdfjs = await import('pdfjs-dist');
+    pdfjs.GlobalWorkerOptions.workerSrc = '/test-worker.mjs';
+  });
+
+  it('an explicit workerSrc wins over an existing global', async () => {
+    const pdfjs = await import('pdfjs-dist');
+    pdfjs.GlobalWorkerOptions.workerSrc = '/global-worker.mjs';
+    const src = new PdfjsSource('https://example.com/doc.pdf', {
+      workerSrc: '/explicit-worker.mjs',
+    });
+    await src.init();
+    expect(pdfjs.GlobalWorkerOptions.workerSrc).toBe('/explicit-worker.mjs');
+  });
+
+  it('an existing global is respected and not overwritten', async () => {
+    const pdfjs = await import('pdfjs-dist');
+    pdfjs.GlobalWorkerOptions.workerSrc = '/global-worker.mjs';
+    const src = new PdfjsSource('https://example.com/doc.pdf');
+    await src.init();
+    expect(pdfjs.GlobalWorkerOptions.workerSrc).toBe('/global-worker.mjs');
+  });
+
+  it('throws when neither is set', async () => {
+    const pdfjs = await import('pdfjs-dist');
+    pdfjs.GlobalWorkerOptions.workerSrc = '';
+    const src = new PdfjsSource('https://example.com/doc.pdf');
+    await expect(src.init()).rejects.toThrow('pdf.js worker is not configured');
   });
 });
