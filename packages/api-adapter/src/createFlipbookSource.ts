@@ -2,11 +2,11 @@ import { PdfjsSource } from '@flipbookjs/react-viewer';
 import type { PageSource, PdfjsSourceOptions } from '@flipbookjs/react-viewer';
 import { PreRenderedPageSource } from './PreRenderedPageSource';
 import type { FlipbookDocument, FlipbookDocumentStatus } from './FlipbookDocument';
-// FlipbookDocumentStatus IS imported — used only by the `satisfies` cast on
-// the KNOWN_STATUSES array literal below, which compile-links the runtime
-// guard to the type union. If a future contract v2 adds a status to the
-// union without updating this array (or vice versa), the `satisfies` fails
-// tsc and the drift is caught at build time.
+// FlipbookDocumentStatus IS imported — used by FlipbookSourceInput and by the
+// `satisfies` cast on the KNOWN_STATUSES array literal below, which
+// compile-links the runtime guard to the type union. If a future contract v2
+// adds a status to the union without updating this array (or vice versa), the
+// `satisfies` fails tsc and the drift is caught at build time.
 
 export interface CreateFlipbookSourceOptions {
   /**
@@ -40,6 +40,17 @@ export interface CreateFlipbookSourceOptions {
    */
   pdfjs?: PdfjsSourceOptions;
 }
+
+/**
+ * What `createFlipbookSource` reads from a document: a full `FlipbookDocument`,
+ * or a CMS's public projection of one (status and URLs, without the record's
+ * identity fields). `status` stays open because the value comes off the wire;
+ * an unknown one falls back to PDF.js.
+ */
+export type FlipbookSourceInput = Pick<FlipbookDocument, 'sourcePdfUrl' | 'artifactManifestUrl'> & {
+  status: FlipbookDocumentStatus | (string & {});
+  id?: string;
+};
 
 // Runtime guard against CMS-side status drift. The TypeScript type is
 // exhaustive at compile time; this array is the runtime defense.
@@ -80,9 +91,11 @@ function isDevMode(): boolean {
 }
 
 export function createFlipbookSource(
-  doc: FlipbookDocument,
+  doc: FlipbookSourceInput,
   options: CreateFlipbookSourceOptions = {},
 ): PageSource {
+  const docRef = doc.id === undefined ? 'without an id' : `id='${doc.id}'`;
+
   // Defensive: unknown status → degrade to PdfjsSource + dev warn.
   // Structural defense against the CMS adding a status without a v2 contract bump.
   // (`as string` widens for the runtime check; doc.status's typed union narrows
@@ -91,7 +104,7 @@ export function createFlipbookSource(
     if (isDevMode()) {
       console.warn(
         `[flipbookjs] createFlipbookSource: unknown FlipbookDocument.status `
-        + `'${doc.status}' on doc id='${doc.id}'. Falling back to PdfjsSource. `
+        + `'${doc.status}' on doc ${docRef}. Falling back to PdfjsSource. `
         + `Verify your @flipbookjs/api-adapter version matches the CMS's `
         + `FlipbookDocument contract.`,
       );
@@ -104,9 +117,12 @@ export function createFlipbookSource(
     (doc.status === 'ready' || doc.status === 'stale')
     && doc.artifactManifestUrl
   ) {
+    // The document's own PDF is the download: the same file the PDF.js
+    // branch below loads.
     return new PreRenderedPageSource({
       bundleUrl: doc.artifactManifestUrl,
       credentials: options.credentials,
+      sourcePdfUrl: doc.sourcePdfUrl,
     });
   }
 
@@ -115,7 +131,7 @@ export function createFlipbookSource(
   if (doc.status === 'ready' && !doc.artifactManifestUrl) {
     if (isDevMode()) {
       console.warn(
-        `[flipbookjs] createFlipbookSource: FlipbookDocument id='${doc.id}' `
+        `[flipbookjs] createFlipbookSource: FlipbookDocument ${docRef} `
         + `has status='ready' but artifactManifestUrl is missing. This `
         + `indicates shape drift on the CMS side. Falling back to PdfjsSource.`,
       );

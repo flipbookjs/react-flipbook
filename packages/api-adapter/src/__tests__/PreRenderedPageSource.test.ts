@@ -650,6 +650,19 @@ describe('PreRenderedPageSource', () => {
       await source.init();
       expect(source.getSourceUrl()).toBeUndefined();
     });
+
+    it('returns the sourcePdfUrl option before init', () => {
+      const source = new PreRenderedPageSource({ bundleUrl: '/b', sourcePdfUrl: 'https://cdn.example.com/doc.pdf' });
+      expect(source.getSourceUrl()).toBe('https://cdn.example.com/doc.pdf');
+    });
+
+    it('prefers the sourcePdfUrl option over the manifest sourcePdf', async () => {
+      const m = makeManifestObject({ documentArtifacts: { outline: 'outline.json', sourcePdf: 'source.pdf' } });
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(manifestResponse(m));
+      const source = new PreRenderedPageSource({ bundleUrl: '/b', sourcePdfUrl: 'https://cdn.example.com/doc.pdf' });
+      await source.init();
+      expect(source.getSourceUrl()).toBe('https://cdn.example.com/doc.pdf');
+    });
   });
 
   describe('dispose', () => {

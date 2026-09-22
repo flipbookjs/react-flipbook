@@ -47,6 +47,8 @@ import type {
   FlipbookDocument,
   FlipbookDocumentStatus,
   CreateFlipbookSourceOptions,
+  // 1.8.0 additions
+  FlipbookSourceInput,
 } from '../index';
 /* eslint-enable @typescript-eslint/no-unused-vars */
 
@@ -91,7 +93,8 @@ describe('adapter public API exports', () => {
     const _status: FlipbookDocumentStatus = 'ready';
     const _opts: CreateFlipbookSourceOptions = { credentials: 'include' };
     const _psOpts: PreRenderedPageSourceOptions = { bundleUrl: 'https://example.com/bundle' };
+    const _input: FlipbookSourceInput = { status: 'ready', sourcePdfUrl: 'https://example.com/x.pdf' };
     // Reference each to defeat unused-var lint.
-    expect([_doc, _status, _opts, _psOpts]).toHaveLength(4);
+    expect([_doc, _status, _opts, _psOpts, _input]).toHaveLength(5);
   });
 });

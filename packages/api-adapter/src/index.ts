@@ -33,3 +33,6 @@ export type {
   FlipbookDocument,
   FlipbookDocumentStatus,
 } from './FlipbookDocument';
+
+// 1.8.0 additions — additive public surface.
+export type { FlipbookSourceInput } from './createFlipbookSource';

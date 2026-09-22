@@ -377,11 +377,20 @@ export interface PreRenderedPageSourceOptions {
   bundleUrl: string | URL;
   /** Forwarded to every fetch() the adapter makes. Default `'same-origin'`. */
   credentials?: RequestCredentials;
+  /**
+   * The document's original PDF, as the integrator's own record holds it.
+   * When set, `getSourceUrl()` returns it before any `sourcePdf` the bundle's
+   * manifest declares, so a pre-rendered document downloads the same file
+   * its PDF.js fallback would load. Returned unchanged, like `PdfjsSource`'s
+   * url: validate the scheme where the record is written.
+   */
+  sourcePdfUrl?: string;
 }
 
 export class PreRenderedPageSource implements PageSource {
   private bundleUrl: string;
   private credentials: RequestCredentials;
+  private sourcePdfUrl: string | undefined;
   private manifest: Manifest | null = null;
   private disposed = false;
 
@@ -399,6 +408,7 @@ export class PreRenderedPageSource implements PageSource {
     // produces correct URLs with a single separator slash.
     this.bundleUrl = raw.replace(/\/+$/, '');
     this.credentials = options.credentials ?? 'same-origin';
+    this.sourcePdfUrl = options.sourcePdfUrl;
   }
 
   async init(): Promise<void> {
@@ -483,6 +493,10 @@ export class PreRenderedPageSource implements PageSource {
     // point validateManifest() (D14) has already enforced both schemes
     // and host policy; this runtime check is purely the absolute-vs-
     // relative discriminator.
+    //
+    // An integrator-supplied sourcePdfUrl comes first: the document's record,
+    // not the bundle, says where its PDF lives.
+    if (this.sourcePdfUrl) return this.sourcePdfUrl;
     const ref = this.manifest?.documentArtifacts?.sourcePdf;
     if (!ref) return undefined;
     return /^https?:\/\//i.test(ref) ? ref : `${this.bundleUrl}/${ref}`;

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createFlipbookSource } from '../createFlipbookSource';
+import type { FlipbookSourceInput } from '../createFlipbookSource';
 import type { FlipbookDocument, FlipbookDocumentStatus } from '../FlipbookDocument';
 
 // Hoisted alongside vi.mock so the factory below can reference the spies.
@@ -49,6 +50,7 @@ describe('createFlipbookSource', () => {
     expect(PreRenderedPageSourceCtor).toHaveBeenCalledWith({
       bundleUrl: 'https://cdn.example.com/bundle',
       credentials: undefined,
+      sourcePdfUrl: doc.sourcePdfUrl,
     });
     expect(PdfjsSourceCtor).not.toHaveBeenCalled();
   });
@@ -60,6 +62,7 @@ describe('createFlipbookSource', () => {
     expect(PreRenderedPageSourceCtor).toHaveBeenCalledWith({
       bundleUrl: 'https://cdn.example.com/bundle',
       credentials: undefined,
+      sourcePdfUrl: doc.sourcePdfUrl,
     });
     expect(PdfjsSourceCtor).not.toHaveBeenCalled();
   });
@@ -128,6 +131,7 @@ describe('createFlipbookSource', () => {
     expect(PreRenderedPageSourceCtor).toHaveBeenCalledWith({
       bundleUrl: 'https://cdn.example.com/bundle',
       credentials: 'include',
+      sourcePdfUrl: doc.sourcePdfUrl,
     });
   });
 
@@ -159,6 +163,7 @@ describe('createFlipbookSource', () => {
     expect(PreRenderedPageSourceCtor).toHaveBeenCalledWith({
       bundleUrl: 'https://cdn.example.com/bundle',
       credentials: undefined,
+      sourcePdfUrl: doc.sourcePdfUrl,
     });
     expect(warnSpy).not.toHaveBeenCalled();
   });
@@ -166,10 +171,11 @@ describe('createFlipbookSource', () => {
   it('13. pdfjs options do NOT leak to PreRenderedPageSource branch', () => {
     const doc = withStatus('ready', { artifactManifestUrl: 'https://cdn.example.com/bundle' });
     createFlipbookSource(doc, { pdfjs: { workerSrc: '/w.js' } });
-    // Only bundleUrl + credentials should reach PreRenderedPageSource — no pdfjs field.
+    // Only bundleUrl, credentials and the document's PDF reach PreRenderedPageSource — no pdfjs field.
     expect(PreRenderedPageSourceCtor).toHaveBeenCalledWith({
       bundleUrl: 'https://cdn.example.com/bundle',
       credentials: undefined,
+      sourcePdfUrl: doc.sourcePdfUrl,
     });
   });
 
@@ -209,5 +215,27 @@ describe('createFlipbookSource', () => {
     } finally {
       globalObj.process = originalProcess;
     }
+  });
+
+  it('17. accepts a public projection: status and URLs, no identity fields', () => {
+    const projection: FlipbookSourceInput = {
+      status: 'ready',
+      sourcePdfUrl: 'https://cdn.example.com/test.pdf',
+      artifactManifestUrl: 'https://cdn.example.com/bundle',
+    };
+    createFlipbookSource(projection);
+    expect(PreRenderedPageSourceCtor).toHaveBeenCalledWith({
+      bundleUrl: 'https://cdn.example.com/bundle',
+      credentials: undefined,
+      sourcePdfUrl: 'https://cdn.example.com/test.pdf',
+    });
+  });
+
+  it('18. warns without an id when a projection carries an unknown status', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    createFlipbookSource({ status: 'archived', sourcePdfUrl: 'https://cdn.example.com/test.pdf' });
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0][0]).toContain('on doc without an id');
+    expect(PdfjsSourceCtor).toHaveBeenCalledWith('https://cdn.example.com/test.pdf', undefined);
   });
 });
