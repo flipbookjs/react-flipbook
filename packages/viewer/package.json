@@ -1,6 +1,6 @@
 {
   "name": "@flipbookjs/react-viewer",
-  "version": "4.0.1",
+  "version": "4.1.0",
   "description": "React PDF flipbook viewer with page curl effect",
   "type": "module",
   "main": "./dist/index.cjs",
