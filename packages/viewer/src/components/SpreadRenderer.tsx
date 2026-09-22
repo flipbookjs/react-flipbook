@@ -8,8 +8,8 @@ const COVER_MOVE_MS = 450;
 const COVER_MOVE_EASE = 'cubic-bezier(0.22, 0.61, 0.36, 1)';
 
 export function SpreadRenderer() {
-  const { state, source, spreads, effectiveScale, bookOpenEnabled, coverOpening, onCoverSettled } =
-    useFlipbookContext();
+  const { state, source, spreads, effectiveScale, bookOpenEnabled, coverOpening,
+          onCoverSettled, onCoverReturned } = useFlipbookContext();
   const { currentSpreadIndex, resolvedViewMode } = state;
 
   // 0-page documents: spreads is empty, and source.getPageSize(0) would crash
@@ -47,6 +47,7 @@ export function SpreadRenderer() {
       // centred within this full width.
       spreadStyle.minWidth = 2 * slotWidth;
     }
+
 
     // Cover-open slide: the lone cover page rests centred; while `coverOpening` it
     // slides right by half a slot into its slot (the base geometry the curl aligns to).
@@ -96,12 +97,12 @@ export function SpreadRenderer() {
                 ? (e) => {
                     // Confirmed cover-slide-finished → release the page turn. Guard to the
                     // slot's OWN transform (not a bubbled child / the return slide).
-                    if (
-                      coverOpening &&
-                      e.propertyName === 'transform' &&
-                      e.target === e.currentTarget
-                    ) {
+                    if (e.propertyName !== 'transform' || e.target !== e.currentTarget) return;
+                    if (coverOpening) {
                       onCoverSettled?.();
+                    } else {
+                      // The return slide (slot → centre) finished: re-measure.
+                      onCoverReturned?.();
                     }
                   }
                 : undefined

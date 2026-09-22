@@ -50,6 +50,17 @@ export interface FlipbookContextValue {
   /** Bumped when the cover reaches its slot. CurlOverlay feeds it to the overlay-rect
    *  measurement as a re-measure trigger so the fold aligns to the slot, not the centre. */
   coverSettleVersion?: number;
+  /** A curl committed straight from the centred cover, so the revealed spread lands
+   *  half a slot left of its place. 'offset' paints it there; 'settling' slides it
+   *  home as a unit; null once it has arrived. */
+  spreadArrival?: 'offset' | 'settling' | null;
+  /** Curl engine → provider: a turn is committing, in the same tick as the spread
+   *  change, so state set here lands in the same render as the new spread. */
+  onCurlCommit?: () => void;
+  /** SpreadRenderer → provider: the arrival slide has finished. */
+  onSpreadArrivalSettled?: () => void;
+  /** SpreadRenderer → provider: the cover finished sliding back to centre. */
+  onCoverReturned?: () => void;
   /** Called by SpreadRenderer when the cover's slide transition actually ends — the
    *  confirmed "slide done" signal that releases the page turn. */
   onCoverSettled?: () => void;

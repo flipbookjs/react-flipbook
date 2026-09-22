@@ -515,7 +515,23 @@ export function FlipbookProvider({
   // scroll, arrow, toolbar), slide it to its slot FIRST, and only AFTER that slide
   // fire the page turn. Refs keep the callbacks stable + readable in event handlers.
   const COVER_MOVE_MS = 450;
+  // Kept in sync with SpreadRenderer's COVER_MOVE_EASE.
+  const COVER_MOVE_EASE = 'cubic-bezier(0.22, 0.61, 0.36, 1)';
+  // Deliberate beat between the cover reaching its slot and the fold starting.
+  // This gap used to exist by accident: the fold waited on pdf.js rasterizing the
+  // incoming spread, which took roughly a second. Faster rasterization removed it,
+  // the slide and the fold ran together, and the sequence read as one lurch. Holding
+  // explicitly keeps the rhythm identical on every machine, document and pdf.js
+  // version instead of tracking whatever the renderer happens to cost.
+  const COVER_SETTLE_HOLD_MS = 200;
   const [coverOpening, setCoverOpening] = useState(false);
+  // A curl that commits straight from the cover (drag or tap on the corner) never
+  // runs the slide-then-fold sequence: the curl turns the cover where it stands,
+  // centred, so the two revealed pages come to rest half a slot left of their place.
+  // Rather than jump them there, let them arrive where the curl left them and then
+  // slide the spread home as a unit. The arrow path is untouched — it slides the
+  // cover into its slot BEFORE folding, so its spread arrives already in place.
+  const [spreadArrival, setSpreadArrival] = useState<'offset' | 'settling' | null>(null);
   const coverOpeningRef = useRef(false);
   coverOpeningRef.current = coverOpening;
   const coverSettledRef = useRef(false); // page turn fires once per open
@@ -537,15 +553,30 @@ export function FlipbookProvider({
   // not a guessed timer. Idempotent per open so transitionend + the safety net can't
   // double-fire. Clean separation: re-measure the overlay at the slot, THEN (next frame,
   // once that measurement has propagated) start the fold — so it folds from the slot.
+  const coverHoldTimerRef = useRef<number | null>(null);
   const finishCoverOpen = useCallback(() => {
     if (!coverOpeningRef.current || coverSettledRef.current) return;
     coverSettledRef.current = true;
-    setCoverSettleVersion((v) => v + 1);
-    window.requestAnimationFrame(() => {
-      const handled = curlNavHandlerRef.current?.('next') ?? false;
-      if (!handled) dispatch({ type: 'NEXT_SPREAD' });
-    });
+    // Hold BEFORE handing the page over to the curl overlay. Bumping
+    // coverSettleVersion re-measures and mounts the overlay, which takes the page
+    // off the normal render path — holding after that bump shows the overlay's
+    // empty canvas for the duration of the beat. During the hold the cover stays a
+    // normally painted page resting at its slot; the fold begins the moment the
+    // overlay takes over.
+    coverHoldTimerRef.current = window.setTimeout(() => {
+      coverHoldTimerRef.current = null;
+      setCoverSettleVersion((v) => v + 1);
+      window.requestAnimationFrame(() => {
+        const handled = curlNavHandlerRef.current?.('next') ?? false;
+        if (!handled) dispatch({ type: 'NEXT_SPREAD' });
+      });
+    }, COVER_SETTLE_HOLD_MS);
   }, [dispatch]);
+
+  // The hold dispatches, so it must not outlive the provider.
+  useEffect(() => () => {
+    if (coverHoldTimerRef.current !== null) window.clearTimeout(coverHoldTimerRef.current);
+  }, []);
 
   // At the cover, going next: the cover-open owns this move. CONSUME every such event
   // (return true) so nothing falls through to the curl mid-slide — critical for a
@@ -588,6 +619,60 @@ export function FlipbookProvider({
     [finishCoverOpen],
   );
   // Ref mirror so the wheel router (empty-deps listener) calls the latest.
+  // Curl-commit hook, called in the same tick as the spread change.
+  const onCurlCommit = useCallback((): void => {
+    if (!bookOpenEnabledRef.current) return;
+    if (resolvedViewModeRef.current !== 'dual-cover') return;
+    if (spreadIdxRef.current !== 0) return;
+    if (coverOpeningRef.current) return; // the arrow path owns this open
+    setSpreadArrival('offset');
+  }, []);
+
+  // The cover finished sliding back to centre after a flip-back. The overlay last
+  // measured the cover at its slot (or the spread before it), so without this a
+  // corner drag at the centred cover hit-tests against a stale rect and misses.
+  const onCoverReturned = useCallback((): void => {
+    setCoverSettleVersion((v) => v + 1);
+  }, []);
+
+  // How far the arriving pages sit from home: half a page, mirroring SpreadRenderer's
+  // slotWidth (page width x scale). Only read while an arrival is in flight, which is
+  // after the document is ready, so getPageSize is safe here.
+  const spreadArrivalOffsetPx =
+    spreadArrival === null ? 0 : (source.getPageSize(0).width * effectiveScale) / 2;
+
+  const onSpreadArrivalSettled = useCallback((): void => {
+    setSpreadArrival(null);
+    // The overlay caches page positions measured from the DOM; it may have measured
+    // while the spread was offset or mid-slide. Re-measure at the settled position so
+    // the next curl from this spread aligns.
+    setCoverSettleVersion((v) => v + 1);
+  }, []);
+
+  // Drive the arrival: once the spread is current and painted at its offset (two
+  // frames, so 'offset' is on screen before the transition is enabled), slide home.
+  // Leaving the spread mid-arrival abandons it. A safety net guarantees an exit if
+  // transitionend never fires (e.g. a zero-width slot, where nothing moves).
+  useEffect(() => {
+    if (spreadArrival === null) return;
+    if (state.currentSpreadIndex !== 1) {
+      onSpreadArrivalSettled();
+      return;
+    }
+    if (spreadArrival === 'offset') {
+      let raf2 = 0;
+      const raf1 = window.requestAnimationFrame(() => {
+        raf2 = window.requestAnimationFrame(() => setSpreadArrival('settling'));
+      });
+      return () => {
+        window.cancelAnimationFrame(raf1);
+        window.cancelAnimationFrame(raf2);
+      };
+    }
+    const safety = window.setTimeout(onSpreadArrivalSettled, COVER_MOVE_MS + 200);
+    return () => window.clearTimeout(safety);
+  }, [spreadArrival, state.currentSpreadIndex, onSpreadArrivalSettled]);
+
   const coverOpenHandlerRef = useRef(maybeStartCoverOpen);
   coverOpenHandlerRef.current = maybeStartCoverOpen;
 
@@ -683,6 +768,10 @@ export function FlipbookProvider({
       showLinks,
       bookOpenEnabled,
       coverOpening,
+      spreadArrival,
+      onCurlCommit,
+      onSpreadArrivalSettled,
+      onCoverReturned,
       coverSettleVersion,
       onCoverSettled: finishCoverOpen,
     }),
@@ -693,6 +782,10 @@ export function FlipbookProvider({
       showLinks,
       bookOpenEnabled,
       coverOpening,
+      spreadArrival,
+      onCurlCommit,
+      onSpreadArrivalSettled,
+      onCoverReturned,
       coverSettleVersion,
       finishCoverOpen,
     ],
@@ -1276,6 +1369,32 @@ export function FlipbookProvider({
                     data-testid="fbjs-ready"
                     className="fbjs-stage"
                     data-overflowing={isOverflowing ? 'true' : undefined}
+                    // The arrival slide moves the STAGE, not the spread: the curl
+                    // overlay lives here too and carries the spine shadow, so pages
+                    // and spine travel as one. The overlay measures page positions
+                    // RELATIVE to this element, so a transform here leaves those
+                    // measurements untouched. The edge arrows sit outside the stage
+                    // and stay put.
+                    style={
+                      spreadArrival === null
+                        ? undefined
+                        : {
+                            transform: `translateX(${spreadArrival === 'offset' ? -spreadArrivalOffsetPx : 0}px)`,
+                            transition:
+                              spreadArrival === 'settling'
+                                ? `transform ${COVER_MOVE_MS}ms ${COVER_MOVE_EASE}`
+                                : 'none',
+                          }
+                    }
+                    onTransitionEnd={
+                      spreadArrival === 'settling'
+                        ? (e) => {
+                            if (e.propertyName === 'transform' && e.target === e.currentTarget) {
+                              onSpreadArrivalSettled();
+                            }
+                          }
+                        : undefined
+                    }
                   >
                     <ErrorBoundary>
                       <SpreadRenderer />

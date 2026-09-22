@@ -39,7 +39,8 @@ export interface UseCurlModeReturn {
 
 export const useCurlMode = (params: UseCurlModeParams): UseCurlModeReturn => {
   const { enabled, stageRef, overlayRef, overlayRect, spreadGeometry, registryRead, registryVersion } = params;
-  const { state, source, effectiveScale, registerCurlWheelHandler, registerCurlNavHandler } = useFlipbookContext();
+  const { state, source, effectiveScale, registerCurlWheelHandler, registerCurlNavHandler,
+          onCurlCommit } = useFlipbookContext();
   const { resolvedViewMode, pageCount } = state;
 
   // --- Page dimensions (CSS pixels at current scale) ---
@@ -66,6 +67,7 @@ export const useCurlMode = (params: UseCurlModeParams): UseCurlModeReturn => {
     getCancelSignal,
     pageWidth,
     pageHeight,
+    onCommit: onCurlCommit,
   });
 
   // --- Bitmap readiness (Decision 11 preconditions #3/#4) ---

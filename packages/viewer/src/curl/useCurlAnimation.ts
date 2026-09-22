@@ -54,6 +54,12 @@ export interface UseCurlAnimationParams {
   pageWidth: number;
   /** Single-page height in CSS pixels at current scale. */
   pageHeight: number;
+  /**
+   * Called when a turn commits, immediately before the spread change is dispatched
+   * and in the same tick, so any host state set here renders together with the new
+   * spread. Not called for a spring-back or a drift-aborted commit.
+   */
+  onCommit?: () => void;
 }
 
 /** Snapshot of animation state — React state. Re-publishes only on state transitions. */
@@ -114,6 +120,10 @@ export const useCurlAnimation = (
   const animStartPointRef = useRef<Point>({ x: 0, y: 0 });
   const animTargetPointRef = useRef<Point>({ x: 0, y: 0 });
   const animDurationRef = useRef<number>(cfg.animationDuration);
+  // Ref-mirrored so startAutoAnimate (called from stable action closures) always
+  // reaches the latest callback without re-creating the actions object.
+  const onCommitRef = useRef(params.onCommit);
+  onCommitRef.current = params.onCommit;
 
   // Per-frame render callback — set by CurlOverlay, called from rAF loop.
   const renderCallbackRef = useRef<
@@ -261,6 +271,8 @@ export const useCurlAnimation = (
       return false;
     }
 
+    // Same tick as the dispatch: the host's reaction lands in the same render.
+    onCommitRef.current?.();
     // dispatch is referentially stable per useReducer contract — safe to close over.
     dispatch({ type: 'GO_TO_SPREAD', index: snap.targetSpreadIndex });
     dragStartSnapshotRef.current = null;
