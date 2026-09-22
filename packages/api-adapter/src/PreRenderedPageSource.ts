@@ -606,6 +606,49 @@ export class PreRenderedPageSource implements PageSource {
     }
   }
 
+  /**
+   * PageSource.getEncodedPage — the tile as fetched, with no canvas.
+   *
+   * Deliberately does NOT call acquireRenderSlot(): that limiter bounds canvas
+   * and ImageBitmap allocation, and this path allocates neither. Queueing here
+   * would cap the print pipeline at maxConcurrentRenders for no benefit.
+   *
+   * Uses the 'nearest' tier policy — see selectTierWidth for why print differs
+   * from display.
+   *
+   * requireInit() is used unchanged, and it runs BEFORE the fetch: a call
+   * started after disposal rejects as a caller error, but one already awaiting
+   * its response may still resolve. That is acceptable because disposal during
+   * printing is anomalous — every real cancellation path aborts the signal
+   * first. Only `signal` produces AbortError, per the PageSource contract.
+   */
+  async getEncodedPage(index: number, scale: number, signal?: AbortSignal): Promise<Blob> {
+    this.requireInit();
+    // `index` is NOT checked here: getPageSize() below is the boundary for it
+    // and throws the identical RangeError. `scale` has no such downstream
+    // validator, so it is checked here (house rule 3 — validate once, at the
+    // boundary, then trust).
+    if (!Number.isFinite(scale) || scale <= 0) {
+      throw new RangeError(`getEncodedPage scale must be a positive finite number; got ${scale}`);
+    }
+    if (signal?.aborted) throw new DOMException('aborted', 'AbortError');
+
+    const { width: pageWidth } = this.getPageSize(index);
+    const tierUrl = this.tierUrlFor(index, this.selectTierWidth(index, pageWidth * scale, 'nearest'));
+    const res = await fetch(tierUrl, { signal, credentials: this.credentials });
+    if (!res.ok) {
+      // Path only, query stripped. This message reaches a user-visible banner
+      // (usePrint dispatches it as SET_PRINT_ERROR.message -> labels.ts:48 ->
+      // PrintErrorBanner), so a signed or tokenised bundle URL would be
+      // rendered verbatim on screen and into support screenshots. The path
+      // alone names the page and the tier, which is the whole diagnostic value.
+      throw new Error(
+        `Failed to load tier ${tierUrl.split('?')[0]}: ${res.status} ${res.statusText}`,
+      );
+    }
+    return res.blob();
+  }
+
   async getTextContent(index: number): Promise<TextItem[]> {
     this.requireInit();
     const url = this.buildSidecarUrl(index, 'text');
@@ -1247,16 +1290,39 @@ export class PreRenderedPageSource implements PageSource {
     if (!this.manifest) throw new Error('PreRenderedPageSource not initialized');
   }
 
-  private pickTier(index: number, requestedWidth: number): string {
+  /**
+   * Tier width for a requested pixel width.
+   *
+   * `'up'` is the display policy: never show fewer pixels than asked for, so a
+   * page is soft-downscaled rather than upscaled. `'nearest'` is the print
+   * policy: the print sheet holds every page decoded at once, so rounding up
+   * multiplies peak memory (a 2048 tile decodes to 21.7 MB against 5.4 MB for
+   * 1024) while CSS sizes the printed image regardless of its intrinsic width.
+   * Print therefore takes the closest tier. On a tie the smaller width wins.
+   */
+  private selectTierWidth(
+    index: number,
+    requestedWidth: number,
+    policy: 'up' | 'nearest',
+  ): number {
     const manifest = this.manifest!;
     const override = manifest.overrides?.[this.pageId(index)];
-    // `widths` is guaranteed sorted-unique-positive by validateManifest
-    // (D14 Part 3). Per house-rules Rule 3, we trust the validator and
-    // don't re-sort here. find() walks in declaration order, which is
-    // already ascending.
+    // `widths` is guaranteed non-empty + sorted-unique-positive by
+    // validateManifest (D14 Part 3, validateWidthsArray). Per house-rules
+    // Rule 3, we trust the validator and don't re-sort here.
     const widths = override?.widths ?? manifest.defaults.widths;
-    const picked = widths.find((w) => w >= requestedWidth) ?? widths[widths.length - 1];
-    const tierUrls = override?.tierUrls;
+    if (policy === 'nearest') {
+      return widths.reduce((best, w) =>
+        Math.abs(w - requestedWidth) < Math.abs(best - requestedWidth) ? w : best,
+      );
+    }
+    // find() walks in declaration order, which is already ascending.
+    return widths.find((w) => w >= requestedWidth) ?? widths[widths.length - 1];
+  }
+
+  private tierUrlFor(index: number, picked: number): string {
+    const manifest = this.manifest!;
+    const tierUrls = manifest.overrides?.[this.pageId(index)]?.tierUrls;
     if (tierUrls && tierUrls[picked]) {
       return `${this.bundleUrl}/${tierUrls[picked]}`;
     }
@@ -1265,6 +1331,10 @@ export class PreRenderedPageSource implements PageSource {
       .replace('{width}', String(picked))
       .replace('{format}', manifest.defaults.format);
     return `${this.bundleUrl}/${path}`;
+  }
+
+  private pickTier(index: number, requestedWidth: number): string {
+    return this.tierUrlFor(index, this.selectTierWidth(index, requestedWidth, 'up'));
   }
 
   private buildSidecarUrl(index: number, sidecar: string): string {

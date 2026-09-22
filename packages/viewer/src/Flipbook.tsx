@@ -142,9 +142,15 @@ interface FlipbookCommonProps {
    *  responsibility if it crashes their tab). Invalid values (NaN, ≤0,
    *  non-finite) fall back to the default with a dev-warn. */
   printMaxPages?: number;
-  /** Per-page rasterization scale. Default 2.0 (≈ 144 DPI). Clamped to
-   *  [0.5, 6.0] at the prop-acceptance boundary with a dev-warn on
-   *  out-of-range. */
+  /** Per-page rasterization scale. Default 2.0. Clamped to [0.5, 6.0] at the
+   *  prop-acceptance boundary with a dev-warn on out-of-range.
+   *
+   *  Printed resolution depends on the source. A rasterising source (PdfjsSource)
+   *  renders exactly at this scale: 2.0 is ≈ 144 DPI on US Letter. A source with
+   *  fixed-width tiers (PreRenderedPageSource) prints its nearest tier instead,
+   *  so 2.0 on a 612pt page selects the 1024px tier, ≈ 120 DPI. Raise this to
+   *  reach a larger tier — at 3.0 the same page selects 2048px — at the cost of
+   *  peak memory, since the print sheet holds every page decoded at once. */
   printScale?: number;
   /** Auto-dismiss timer for the print-error banner (ms). Default 8000.
    *  0 / Infinity / NaN / negative = disable auto-dismiss (consumer dismisses

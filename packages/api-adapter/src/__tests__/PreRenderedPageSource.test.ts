@@ -665,6 +665,82 @@ describe('PreRenderedPageSource', () => {
     });
   });
 
+  describe('getEncodedPage', () => {
+    // Same routing shape as `renderPage scale selection (D3)` above: one fetch
+    // mock that answers manifest.json during init() and tiles afterwards, so
+    // tile assertions are never confused by the init request.
+    async function readyAdapter(opts: {
+      credentials?: RequestCredentials;
+      trackUrl?: (url: string) => void;
+      trackInit?: (init: RequestInit | undefined) => void;
+      deferTiles?: Array<() => void>;
+    } = {}): Promise<PreRenderedPageSource> {
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.endsWith('/manifest.json')) return manifestResponse(makeManifestObject());
+        opts.trackUrl?.(url);
+        opts.trackInit?.(init);
+        if (opts.deferTiles) {
+          return new Promise<Response>((resolve) => {
+            opts.deferTiles!.push(() => resolve(imageResponse()));
+          });
+        }
+        return imageResponse();
+      });
+      const source = new PreRenderedPageSource({ bundleUrl: '/b', credentials: opts.credentials });
+      await source.init();
+      return source;
+    }
+
+    it('picks the NEAREST tier, not the next one up', async () => {
+      let lastUrl = '';
+      const source = await readyAdapter({ trackUrl: (u) => { lastUrl = u; } });
+      // pageWidth=594, scale=2 → targetWidth=1188; widths [512,1024,2048,4096].
+      // nearest is 1024 (|1024-1188| = 164) not 2048 (|2048-1188| = 860).
+      await source.getEncodedPage(0, 2);
+      expect(lastUrl).toMatch(/width-1024\.webp$/);
+    });
+
+    it('leaves the display path on round-up', async () => {
+      let lastUrl = '';
+      const source = await readyAdapter({ trackUrl: (u) => { lastUrl = u; } });
+      // Same page and scale; renderPage must still select the first tier >= 1188.
+      await source.renderPage(0, 2);
+      expect(lastUrl).toMatch(/width-2048\.webp$/);
+    });
+
+    it('forwards the credentials policy', async () => {
+      let tileInit: RequestInit | undefined;
+      const source = await readyAdapter({
+        credentials: 'include',
+        trackInit: (i) => { tileInit = i; },
+      });
+      await source.getEncodedPage(0, 2);
+      expect(tileInit).toMatchObject({ credentials: 'include' });
+    });
+
+    it('rejects with AbortError when the signal is already aborted', async () => {
+      const source = await readyAdapter();
+      const ac = new AbortController();
+      ac.abort();
+      await expect(source.getEncodedPage(0, 2, ac.signal))
+        .rejects.toMatchObject({ name: 'AbortError' });
+    });
+
+    it('does NOT queue behind the render limiter', async () => {
+      // Deferred tile responses: nothing resolves until released, so the count
+      // of STARTED fetches is the real concurrency. maxConcurrentRenders is 3 —
+      // an implementation that took a render slot would stall at 3 here.
+      const release: Array<() => void> = [];
+      const source = await readyAdapter({ deferTiles: release });
+      const calls = Array.from({ length: 6 }, (_u, i) => source.getEncodedPage(i % 3, 2));
+      // getEncodedPage has no await before fetch(), so all six start synchronously.
+      expect(release).toHaveLength(6);
+      release.forEach((r) => r());
+      await expect(Promise.all(calls)).resolves.toHaveLength(6);
+    });
+  });
+
   describe('dispose', () => {
     it('throws on subsequent method calls after dispose', async () => {
       vi.spyOn(globalThis, 'fetch').mockResolvedValue(manifestResponse(makeManifestObject()));

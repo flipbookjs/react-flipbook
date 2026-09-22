@@ -110,6 +110,34 @@ export interface PageSource {
     signal?: AbortSignal,
   ): Promise<HTMLCanvasElement>;
 
+  /**
+   * Optional: the page as an already-encoded image, for consumers that want
+   * bytes rather than pixels (the print pipeline is the first).
+   *
+   * **Its `scale` contract differs from `renderPage`'s.** `renderPage(i, scale)`
+   * means "rasterise exactly at this scale". `getEncodedPage(i, scale)` means
+   * "the nearest raster you already hold, near this scale" — an implementation
+   * backed by fixed-width tiers returns the closest tier, which may be above or
+   * below the requested width. Callers needing an exact size must use
+   * `renderPage`.
+   *
+   * Implement this ONLY when the image is already encoded and no rasterisation
+   * is needed; the point is to avoid allocating a canvas. Sources that must
+   * rasterise (e.g. `PdfjsSource`) leave it undefined and callers fall back.
+   *
+   * MUST reject with an error whose `.name === 'AbortError'` when `signal`
+   * fires. Any other failure rejects normally, so the caller reports it as a
+   * page failure rather than silently treating it as a cancellation. A call
+   * STARTED after the source was disposed is one such ordinary failure; a call
+   * already in flight when disposal happens may still resolve, and callers must
+   * not rely on disposal to cancel it — abort the signal for that.
+   */
+  getEncodedPage?(
+    index: number,
+    scale: number,
+    signal?: AbortSignal,
+  ): Promise<Blob>;
+
   /** Optional: text content for selection/search (future 1.x minor) */
   getTextContent?(index: number): Promise<TextItem[]>;
 

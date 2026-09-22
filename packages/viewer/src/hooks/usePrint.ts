@@ -5,6 +5,14 @@ import type { PageSource } from '../types/PageSource';
 
 const MAX_CANVAS_DIM = 16384;  // M7 — Chrome ceiling; Safari is lower
 
+// How far ahead the print loop fetches when the source hands over encoded bytes.
+// NOT a memory knob: a 1024-tier page measures 79-168 KB, so six in flight is
+// about 1 MB, and peak memory is set by the decoded images accumulating in the
+// sheet, which is independent of this number. 6 matches the browser's own
+// per-origin connection limit on HTTP/1.1 and is harmless on HTTP/2.
+// Canvas-backed sources do not prefetch at all — see 13aa52f.
+const PRINT_PREFETCH = 6;
+
 // Typed error subclasses carry the phase discriminator + canvas dims as
 // first-class fields, instead of encoding them as magic substrings in the
 // error message. The for-loop catch reads `err.phase` directly, eliminating
@@ -327,6 +335,30 @@ export function usePrint({
     const afterprintHandler = (cleanup as { afterprint?: () => void }).afterprint!;
 
     try {
+      // Rolling prefetch window, encoded sources only. `prefetch[j]` is the
+      // in-flight (or settled) fetch for page j; the loop below consumes them in
+      // page order, so out-of-order completion cannot reorder the sheet and the
+      // failure a job reports is always the first in PAGE order rather than
+      // whichever rejected first in wall-clock time.
+      const getEncoded = source.getEncodedPage?.bind(source);
+      const prefetch: Array<Promise<Blob>> = [];
+      const fillWindow = (throughIndex: number): void => {
+        if (!getEncoded) return;
+        for (let j = prefetch.length; j <= throughIndex && j < totalPages; j++) {
+          const task = getEncoded(j, scaleForThisJob, controller.signal);
+          // Deliberate suppression, not a swallowed promise. For every page the
+          // consumer reaches, `await prefetch[j]` below observes the rejection
+          // and reports it. For pages ABANDONED after an earlier page already
+          // failed, this handler is the only one — normally an AbortError we
+          // caused ourselves, but a genuine failure in that window is also
+          // discarded. That is intended: the job reports the FIRST failure in
+          // page order, and later failures on a dead job are noise. Without
+          // this handler they would surface as unhandled rejections.
+          void task.catch(() => { /* see above — intentionally terminal */ });
+          prefetch[j] = task;
+        }
+      };
+
       for (let i = 0; i < totalPages; i++) {
         // Abort-check at the TOP of each iteration. The previous iteration's
         // `await new Promise((r) => setTimeout(r, 0))` yield is NOT
@@ -339,9 +371,16 @@ export function usePrint({
         }
         let blob: Blob;
         try {
-          blob = await renderPageToBlob({
-            source, pageIndex: i, scale: scaleForThisJob, signal: controller.signal,
-          });
+          if (getEncoded) {
+            fillWindow(i + PRINT_PREFETCH - 1);
+            blob = await prefetch[i];
+          } else {
+            // Canvas path unchanged: one render at a time, started only after
+            // the previous page's decode and yield (13aa52f).
+            blob = await renderPageToBlob({
+              source, pageIndex: i, scale: scaleForThisJob, signal: controller.signal,
+            });
+          }
         } catch (err) {
           // Render/blob errors dispatch SET_PRINT_ERROR so the banner
           // surfaces them. AbortError still bubbles to the outer catch.
@@ -360,6 +399,9 @@ export function usePrint({
               },
             });
             cleanup({ kind: 'error', error: err, phase: 'blob' });
+            // Stop prefetches still in flight behind this page. cleanup() has
+            // nulled abortControllerRef, so this uses the local `controller`.
+            controller.abort();
           } else {
             const renderErr = err as Error;
             dispatch({
@@ -367,6 +409,7 @@ export function usePrint({
               payload: { type: 'render-failed', pageIndex: i, message: renderErr.message },
             });
             cleanup({ kind: 'error', error: renderErr, phase: 'render' });
+            controller.abort();
           }
           // cleanup() nulls activeCleanupRef itself; no manual null needed.
           throw err;
@@ -396,6 +439,7 @@ export function usePrint({
             payload: { type: 'render-failed', pageIndex: renderErr.pageIndex ?? i, message: renderErr.message },
           });
           cleanup({ kind: 'error', error: renderErr, phase: 'render' });
+          controller.abort();
           throw err;
         }
         await new Promise((r) => setTimeout(r, 0));

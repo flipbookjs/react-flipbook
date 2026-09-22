@@ -706,6 +706,137 @@ describe('usePrint — Phase 5.1', () => {
     expect(onPrintAbort).toHaveBeenCalledWith({ reason: 'user-cancel' });
     vi.useRealTimers();
   });
+
+  // PRINT_PREFETCH is module-private in usePrint.ts. Mirror it here rather than
+  // exporting it purely for tests; if the two drift, tests 25 and 27 fail loudly.
+  const PRINT_PREFETCH_FOR_TEST = 6;
+
+  // Helper: a stub source that hands over encoded blobs instead of canvases.
+  function withEncoded(
+    pageCount: number,
+    impl: (index: number) => Promise<Blob>,
+  ) {
+    const { source, renderPageSpy } = makeStubSource(pageCount);
+    const encoded = vi.fn(impl);
+    source.getEncodedPage = encoded as unknown as PageSource['getEncodedPage'];
+    return { source, encoded, renderPageSpy };
+  }
+
+  // 24
+  it('24. Encoded source → getEncodedPage used, renderPage never called', async () => {
+    const { source, encoded, renderPageSpy } = withEncoded(3, async (i) => new Blob([String(i)]));
+    const { result } = renderPrintHook({ source, pageCount: 3 });
+    await act(async () => { await result.current.print(); });
+    expect(encoded).toHaveBeenCalledTimes(3);
+    expect(renderPageSpy).not.toHaveBeenCalled();
+    expect(document.querySelectorAll('.fbjs-print-page')).toHaveLength(3);
+  });
+
+  // 25
+  it('25. Prefetch is bounded at PRINT_PREFETCH and never runs ahead of it', async () => {
+    const release: Array<() => void> = [];
+    // Phase A: nothing settles, so the count of STARTED calls is the real window.
+    let deferred = true;
+    const { source, encoded } = withEncoded(20, (i) => {
+      if (!deferred) return Promise.resolve(new Blob([String(i)]));
+      return new Promise<Blob>((resolve) => { release[i] = () => resolve(new Blob([String(i)])); });
+    });
+    const { result } = renderPrintHook({ source, pageCount: 20 });
+    let printPromise: Promise<void>;
+    await act(async () => { printPromise = result.current.print(); });
+    await waitFor(() => encoded.mock.calls.length >= PRINT_PREFETCH_FOR_TEST);
+    // Nothing has resolved, so the window cannot have advanced: exactly 6 of 20.
+    expect(encoded).toHaveBeenCalledTimes(PRINT_PREFETCH_FOR_TEST);
+
+    // Phase B: pages created from here on resolve immediately, THEN release the
+    // first six. Releasing only the initial six would hang — the consumer
+    // advances, fillWindow creates pages 6..19, and those would never settle.
+    deferred = false;
+    release.forEach((r) => r?.());
+    await act(async () => { await printPromise!; });
+    expect(encoded).toHaveBeenCalledTimes(20);
+  });
+
+  // 26
+  it('26. Out-of-order completion still appends pages in page order', async () => {
+    const blobs = [new Blob(['0']), new Blob(['1']), new Blob(['2'])];
+    const release: Array<() => void> = [];
+    const { source } = withEncoded(3, (i) =>
+      new Promise<Blob>((resolve) => { release[i] = () => resolve(blobs[i]); }));
+    const { result } = renderPrintHook({ source, pageCount: 3 });
+    let printPromise: Promise<void>;
+    await act(async () => { printPromise = result.current.print(); });
+    await waitFor(() => release.filter(Boolean).length === 3);
+    // Settle 2, then 0, then 1. The sheet must still read 0,1,2.
+    release[2](); release[0](); release[1]();
+    await act(async () => { await printPromise!; });
+    // createObjectURL is called once per appended page, in append order. Mapping
+    // each argument back to its page index asserts the ORDER, not just the count.
+    const appended = createObjectURLSpy.mock.calls.map((c) => blobs.indexOf(c[0] as Blob));
+    expect(appended).toEqual([0, 1, 2]);
+  });
+
+  // 27
+  it('27. cancelPrint rejects the in-flight prefetches and terminates print()', async () => {
+    const seen: AbortSignal[] = [];
+    const { source } = makeStubSource(20);
+    // The stub honours the signal, as the PageSource contract requires: it
+    // rejects with AbortError from an abort listener. A stub that merely never
+    // settles would leave print() pending forever and the test would assert the
+    // signal flag while leaking the pipeline promise.
+    source.getEncodedPage = ((_i: number, _s: number, signal?: AbortSignal) => {
+      if (signal) seen.push(signal);
+      return new Promise<Blob>((_resolve, reject) => {
+        signal?.addEventListener(
+          'abort',
+          () => reject(new DOMException('aborted', 'AbortError')),
+          { once: true },
+        );
+      });
+    }) as unknown as PageSource['getEncodedPage'];
+    const onPrintAbort = vi.fn();
+    const { result } = renderPrintHook({ source, pageCount: 20, callbacks: { onPrintAbort } });
+    let printPromise: Promise<void>;
+    await act(async () => { printPromise = result.current.print(); });
+    await waitFor(() => seen.length >= PRINT_PREFETCH_FOR_TEST);
+    await act(async () => {
+      result.current.cancelPrint();
+      // print() must actually settle — that is the assertion this test exists for.
+      await printPromise!;
+    });
+    expect(seen.every((sig) => sig.aborted)).toBe(true);
+    expect(onPrintAbort).toHaveBeenCalledWith({ reason: 'user-cancel' });
+    expect(document.querySelector('.fbjs-print-sheet')).toBeNull();
+  });
+
+
+  // 28
+  it('28. A page failure aborts the prefetches still in flight behind it', async () => {
+    const seen: AbortSignal[] = [];
+    const { source } = makeStubSource(20);
+    // Page 0 fails immediately; pages 1..5 are already in flight behind it and
+    // settle only on abort. Without the controller.abort() in the per-page
+    // error branches they would keep running unsignalled.
+    source.getEncodedPage = ((i: number, _s: number, signal?: AbortSignal) => {
+      if (signal) seen.push(signal);
+      if (i === 0) return Promise.reject(new Error('page 0 failed'));
+      return new Promise<Blob>((_resolve, reject) => {
+        signal?.addEventListener(
+          'abort',
+          () => reject(new DOMException('aborted', 'AbortError')),
+          { once: true },
+        );
+      });
+    }) as unknown as PageSource['getEncodedPage'];
+    const { result } = renderPrintHook({ source, pageCount: 20 });
+    await act(async () => {
+      try { await result.current.print(); } catch { /* expected: page 0 failed */ }
+    });
+    // One window was opened, and every task in it shares the job's signal.
+    expect(seen).toHaveLength(PRINT_PREFETCH_FOR_TEST);
+    expect(seen[0].aborted).toBe(true);
+  });
+
 });
 
 // ---- helper used by test #15 ----
