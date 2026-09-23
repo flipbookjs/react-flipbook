@@ -206,6 +206,8 @@ interface FlipbookProviderProps {
   /** Per-page rasterization scale. Default 2.0. See
    *  `FlipbookProps.printScale` for the [0.5, 6.0] clamp behavior. */
   printScale?: number;
+  /** See `FlipbookProps.printOrientation`. Default `'auto'`. */
+  printOrientation?: 'auto' | 'none';
   /** Auto-dismiss timer (ms) for the print-error banner. Default 8000.
    *  See `FlipbookProps.printErrorDismissMs` for the disable values
    *  (0 / Infinity / NaN / negative). */
@@ -259,6 +261,7 @@ export function FlipbookProvider({
   edgeArrowsNode = null,
   printMaxPages: printMaxPagesRaw = 100,
   printScale: printScaleRaw = 2.0,
+  printOrientation = 'auto',
   printErrorDismissMs = 8000,
   onPrintStart,
   onPrintComplete,
@@ -1043,6 +1046,7 @@ export function FlipbookProvider({
     isPrinting: state.isPrinting,
     printMaxPages: printMaxPagesSanitized,
     printScale: printScaleClamped,
+    printOrientation,
     callbacksRef: printCallbacksRef,
   });
 

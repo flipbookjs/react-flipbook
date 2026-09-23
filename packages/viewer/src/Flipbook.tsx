@@ -152,6 +152,16 @@ interface FlipbookCommonProps {
    *  reach a larger tier — at 3.0 the same page selects 2048px — at the cost of
    *  peak memory, since the print sheet holds every page decoded at once. */
   printScale?: number;
+  /** Whether printing may set the paper orientation from the document.
+   *  Default `'auto'`: when EVERY page is wider than it is tall, the print job
+   *  asks for landscape paper. Portrait, square and mixed-orientation documents
+   *  are unaffected and emit no rule.
+   *
+   *  Two consequences for an all-landscape document, which `'none'` opts out of:
+   *  where the browser honours a CSS page size it also disables the print
+   *  dialog's Layout control, and a consumer's own `@page { size: ... }` is
+   *  overridden for the duration of the job. */
+  printOrientation?: 'auto' | 'none';
   /** Auto-dismiss timer for the print-error banner (ms). Default 8000.
    *  0 / Infinity / NaN / negative = disable auto-dismiss (consumer dismisses
    *  via click or programmatically via `actions.dismissPrintError()`). */
@@ -325,6 +335,7 @@ export function Flipbook({
   showThumbnails,
   printMaxPages,
   printScale,
+  printOrientation,
   printErrorDismissMs,
   onPrintStart,
   onPrintComplete,
@@ -485,6 +496,7 @@ export function Flipbook({
       edgeArrowsNode={edgeArrowsNode}
       printMaxPages={printMaxPages}
       printScale={printScale}
+      printOrientation={printOrientation}
       printErrorDismissMs={printErrorDismissMs}
       onPrintStart={onPrintStart}
       onPrintComplete={onPrintComplete}

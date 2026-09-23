@@ -26,6 +26,11 @@
   .fbjs-print-page:last-child { page-break-after: auto; }
 }
 
+/* No `size` here on purpose: orientation depends on the document, not the
+   stylesheet, so usePrint injects `@page { size: landscape; margin: 0 }` at
+   print time for all-landscape documents and removes it in cleanup. Portrait,
+   square and mixed documents emit nothing and keep the reader's orientation
+   choice. Adding a static `size` here would override that for every document. */
 @page { margin: 0; }
 
 /* ============================================================

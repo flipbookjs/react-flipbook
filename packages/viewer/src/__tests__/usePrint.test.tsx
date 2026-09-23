@@ -89,6 +89,7 @@ interface HookOpts {
   isPrinting?: boolean;
   printMaxPages?: number;
   printScale?: number;
+  printOrientation?: 'auto' | 'none';
   callbacks?: PrintCallbacks;
 }
 function renderPrintHook(opts: HookOpts = {}) {
@@ -102,6 +103,7 @@ function renderPrintHook(opts: HookOpts = {}) {
     isPrinting: opts.isPrinting ?? false,
     printMaxPages: opts.printMaxPages ?? 100,
     printScale: opts.printScale ?? 2.0,
+    printOrientation: opts.printOrientation ?? ('auto' as const),
     callbacksRef,
   };
   const r = renderHook((props: typeof initialProps) => usePrint(props), { initialProps });
@@ -513,6 +515,7 @@ describe('usePrint — Phase 5.1', () => {
         pageCount: 2,
         isPrinting: false,
         printMaxPages: 100,
+        printOrientation: 'auto' as const,
         printScale: 2.0,
         callbacksRef,
       }),
@@ -835,6 +838,112 @@ describe('usePrint — Phase 5.1', () => {
     // One window was opened, and every task in it shares the job's signal.
     expect(seen).toHaveLength(PRINT_PREFETCH_FOR_TEST);
     expect(seen[0].aborted).toBe(true);
+  });
+
+
+  // Query by the element's own tag, not by scanning every head <style> for
+  // '@page' — print.css declares one too, and whether it reaches document.head
+  // depends on vitest's `css` setting, which this helper must not depend on.
+  function pageStyleRules(): string[] {
+    return [...document.head.querySelectorAll('style[data-fbjs-print="page-size"]')]
+      .map((el) => el.textContent ?? '');
+  }
+
+  // 29
+  it('29. Landscape document injects @page size and removes it on finish; portrait does not', async () => {
+    const landscape = makeStubSource(2);
+    landscape.source.getPageSize = () => ({ width: 1152, height: 648 });
+    const a = renderPrintHook({ source: landscape.source, pageCount: 2 });
+    await act(async () => { await a.result.current.print(); });
+    expect(pageStyleRules()).toEqual(['@page { size: landscape; margin: 0; }']);
+    // afterprint runs cleanup, which must take the rule with it.
+    await fireAfterprint();
+    expect(pageStyleRules()).toEqual([]);
+    a.unmount();
+
+    const portrait = makeStubSource(2);
+    portrait.source.getPageSize = () => ({ width: 612, height: 792 });
+    const b = renderPrintHook({ source: portrait.source, pageCount: 2 });
+    await act(async () => { await b.result.current.print(); });
+    expect(pageStyleRules()).toEqual([]);
+  });
+
+  // 30
+  it('30. A mixed-orientation document emits no rule', async () => {
+    const { source } = makeStubSource(3);
+    // Landscape cover, portrait body — forcing landscape would shrink the body
+    // pages to about 60% of the sheet.
+    source.getPageSize = (i: number) => (i === 0
+      ? { width: 1152, height: 648 }
+      : { width: 612, height: 792 });
+    const { result } = renderPrintHook({ source, pageCount: 3 });
+    await act(async () => { await result.current.print(); });
+    expect(pageStyleRules()).toEqual([]);
+  });
+
+  // 31
+  it('31. The @page rule is removed when the job is cancelled', async () => {
+    const { source } = makeStubSource(2);
+    source.getPageSize = () => ({ width: 1152, height: 648 });
+    const { result } = renderPrintHook({ source, pageCount: 2 });
+    await act(async () => { await result.current.print(); });
+    expect(pageStyleRules()).toHaveLength(1);
+    await act(async () => { result.current.cancelPrint(); });
+    expect(pageStyleRules()).toEqual([]);
+  });
+
+  // 32
+  it('32. The @page rule is removed on unmount', async () => {
+    const { source } = makeStubSource(2);
+    source.getPageSize = () => ({ width: 1152, height: 648 });
+    const { result, unmount } = renderPrintHook({ source, pageCount: 2 });
+    await act(async () => { await result.current.print(); });
+    expect(pageStyleRules()).toHaveLength(1);
+    unmount();
+    expect(pageStyleRules()).toEqual([]);
+  });
+
+  // 33
+  it('33. printOrientation="none" suppresses the rule on a landscape document', async () => {
+    const { source } = makeStubSource(2);
+    source.getPageSize = () => ({ width: 1152, height: 648 });
+    const { result } = renderPrintHook({ source, pageCount: 2, printOrientation: 'none' });
+    await act(async () => { await result.current.print(); });
+    expect(pageStyleRules()).toEqual([]);
+    expect(printSpy).toHaveBeenCalledTimes(1);
+  });
+
+  // 34
+  it('34. A square page counts as portrait', async () => {
+    const { source } = makeStubSource(2);
+    source.getPageSize = () => ({ width: 700, height: 700 });
+    const { result } = renderPrintHook({ source, pageCount: 2 });
+    await act(async () => { await result.current.print(); });
+    expect(pageStyleRules()).toEqual([]);
+  });
+
+  // 35
+  it('35. A source reporting zero pages does not inject a rule', async () => {
+    const { source } = makeStubSource(2);
+    source.getPageSize = () => ({ width: 1152, height: 648 });
+    // pageCount prop says 2, so print() clears its own zero guard; the SOURCE
+    // says 0, as an unloaded PdfjsSource does. The scan must not conclude
+    // "every page is landscape" from having examined none.
+    source.getPageCount = () => 0;
+    const { result } = renderPrintHook({ source, pageCount: 2 });
+    await act(async () => { await result.current.print(); });
+    expect(pageStyleRules()).toEqual([]);
+  });
+
+  // 36
+  it('36. The @page rule is removed when a page fails', async () => {
+    const { source } = makeStubSource(2, { renderImpl: () => Promise.reject(new Error('boom')) });
+    source.getPageSize = () => ({ width: 1152, height: 648 });
+    const { result } = renderPrintHook({ source, pageCount: 2 });
+    await act(async () => {
+      try { await result.current.print(); } catch { /* expected */ }
+    });
+    expect(pageStyleRules()).toEqual([]);
   });
 
 });

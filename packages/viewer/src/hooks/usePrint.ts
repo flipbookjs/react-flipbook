@@ -53,6 +53,7 @@ interface UsePrintArgs {
   isPrinting: boolean;
   printMaxPages: number;
   printScale: number;
+  printOrientation: 'auto' | 'none';
   callbacksRef: RefObject<PrintCallbacks>;
 }
 
@@ -63,11 +64,39 @@ interface UsePrintReturn {
 
 // ---------- Module-private helpers ----------
 
-function setupPrintSheet(): { printSheet: HTMLDivElement; objectUrls: string[] } {
+function setupPrintSheet(landscape: boolean): {
+  printSheet: HTMLDivElement;
+  pageStyle: HTMLStyleElement | null;
+  objectUrls: string[];
+} {
   const printSheet = document.createElement('div');
   printSheet.className = 'fbjs-print-sheet';
   document.body.appendChild(printSheet);
-  return { printSheet, objectUrls: [] };
+
+  // Orientation can only be known at print time — it comes from the document,
+  // not the stylesheet — so the rule is injected here and removed in cleanup.
+  //
+  // Emitted ONLY when every page is landscape (the caller scans). A portrait
+  // document already fills the sheet, so emitting `size: portrait` for it would
+  // change nothing except to take the orientation control away from the reader.
+  // A mixed-orientation document emits nothing for the same reason: one @page
+  // rule covers the whole sheet, so any choice would be wrong for some pages.
+  let pageStyle: HTMLStyleElement | null = null;
+  if (landscape) {
+    pageStyle = document.createElement('style');
+    // Tagged so tests and a human debugging a stranded rule can find it by
+    // attribute rather than by scanning every head <style> for '@page' —
+    // print.css declares one too, and whether it reaches document.head depends
+    // on the bundler and on vitest's `css` setting.
+    pageStyle.dataset.fbjsPrint = 'page-size';
+    // `margin: 0` is restated rather than inherited from print.css. Two @page
+    // blocks are expected to cascade their declarations, but if that is wrong
+    // the failure is silent — margins quietly return. Restating costs nothing
+    // and removes the question.
+    pageStyle.textContent = '@page { size: landscape; margin: 0; }';
+    document.head.appendChild(pageStyle);
+  }
+  return { printSheet, pageStyle, objectUrls: [] };
 }
 
 type CleanupOutcome =
@@ -77,6 +106,7 @@ type CleanupOutcome =
 
 function makeCleanup(args: {
   printSheet: HTMLElement;
+  pageStyle: HTMLStyleElement | null;
   objectUrls: string[];
   abortControllerRef: MutableRefObject<AbortController | null>;
   isPrintingRef: MutableRefObject<boolean>;
@@ -99,6 +129,9 @@ function makeCleanup(args: {
     window.removeEventListener('afterprint', afterprintHandler);
     // Remove DOM before revoking URLs (img refs go away cleanly).
     args.printSheet.remove();
+    // Same exit paths as the sheet: success, error, abort, unmount. Leaving it
+    // behind would apply a landscape @page rule to the consumer's own pages.
+    args.pageStyle?.remove();
     args.objectUrls.forEach((url) => URL.revokeObjectURL(url));
     args.abortControllerRef.current = null;
     args.isPrintingRef.current = false;  // synchronous release for re-entry guard
@@ -233,12 +266,14 @@ async function decodePrintImage(args: {
 // ---------- The hook ----------
 
 export function usePrint({
-  source, dispatch, pageCount, isPrinting, printMaxPages, printScale, callbacksRef,
+  source, dispatch, pageCount, isPrinting, printMaxPages, printScale, printOrientation,
+  callbacksRef,
 }: UsePrintArgs): UsePrintReturn {
   const isPrintingRef = useRef(isPrinting);
   const pageCountRef = useRef(pageCount);
   const printMaxPagesRef = useRef(printMaxPages);
   const printScaleRef = useRef(printScale);
+  const printOrientationRef = useRef(printOrientation);
   const abortControllerRef = useRef<AbortController | null>(null);
   // Holds the makeCleanup return value of the in-flight print job so the
   // source-change/unmount effects can call it with the right abort reason.
@@ -253,6 +288,7 @@ export function usePrint({
   useEffect(() => { pageCountRef.current = pageCount; }, [pageCount]);
   useEffect(() => { printMaxPagesRef.current = printMaxPages; }, [printMaxPages]);
   useEffect(() => { printScaleRef.current = printScale; }, [printScale]);
+  useEffect(() => { printOrientationRef.current = printOrientation; }, [printOrientation]);
 
   // Source-keyed abort cleanup. Fires on (a) source-change rerender, (b) unmount.
   // Uses the sourceRef trick to distinguish: on source change, sourceRef.current
@@ -305,6 +341,29 @@ export function usePrint({
     // Snapshot per-job props at start so a mid-print prop change can't
     // mutate this run's scale (would mismatch error diagnostics).
     const scaleForThisJob = printScaleRef.current;
+
+    // Orientation, computed BEFORE the job is claimed below, so nothing here
+    // can leave isPrintingRef set with no cleanup registered.
+    //
+    // Bound by the SOURCE's own count, not totalPages: state.pageCount lags
+    // source by a render after a rotation (see ThumbnailPanel.tsx for the same
+    // race and the same fix). A stale count would either index past the end or,
+    // worse, scan too few pages and still report landscape.
+    //
+    // EVERY page must be landscape. A PDF can mix orientations, and a landscape
+    // cover over a portrait body would otherwise force landscape paper on the
+    // whole document, taking the body pages from filling the sheet to about 60%
+    // of it. A mixed document emits nothing and prints exactly as it does today.
+    // Seeded from the count so a zero-page scan reports false rather than
+    // vacuously true.
+    const pageCountFromSource = source.getPageCount();
+    let allLandscape = pageCountFromSource > 0 && printOrientationRef.current === 'auto';
+    for (let i = 0; i < pageCountFromSource && allLandscape; i++) {
+      const { width, height } = source.getPageSize(i);
+      // A square page counts as portrait: no rule, no change from today.
+      allLandscape = width > height;
+    }
+
     // performance.now() is monotonic + clock-skew immune (Date.now() can
     // jump backwards on NTP sync, daylight-saving transition, or user clock
     // adjustment, producing negative or absurd durationMs values).
@@ -323,9 +382,9 @@ export function usePrint({
     }
 
     // Build the print sheet + cleanup via the module-private helpers.
-    const { printSheet, objectUrls } = setupPrintSheet();
+    const { printSheet, pageStyle, objectUrls } = setupPrintSheet(allLandscape);
     const cleanup = makeCleanup({
-      printSheet, objectUrls, abortControllerRef, isPrintingRef,
+      printSheet, pageStyle, objectUrls, abortControllerRef, isPrintingRef,
       activeCleanupRef,  // closure nulls itself on idempotent cleanup
       dispatch, startTime, totalPages, callbacksRef,
     });
