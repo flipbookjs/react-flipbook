@@ -45,6 +45,7 @@ import { usePrint, type PrintCallbacks } from './hooks/usePrint';
 import { usePrintErrorDismiss } from './hooks/usePrintErrorDismiss';
 import { devWarn } from './core/devWarn';
 import { sanitizeFilename } from './core/sanitizeFilename';
+import { isTrustedDownloadUrl } from './core/isTrustedDownloadUrl';
 import { increase, decrease } from './zoom/zoomingLevel';
 import { SpecialZoomLevel } from './zoom/SpecialZoomLevel';
 import { pageToSpreadIndex as findSpreadByPageIndex } from './core/computeSpreads';
@@ -222,10 +223,18 @@ interface FlipbookProviderProps {
   onPrintError?: (error: Error, info: { phase: 'too-large' | 'render' | 'blob' }) => void;
   onPrintAbort?: (info: { reason: 'unmount' | 'source-change' | 'user-cancel' }) => void;
 
+  /** A URL whose response the consumer guarantees carries
+   *  `Content-Disposition: attachment`. See `FlipbookProps.downloadUrl` for the
+   *  full contract. Ref-mirrored via `downloadUrlRef` so `actions.download`
+   *  keeps its `[source]` deps and a freshly generated URL on each render does
+   *  not rotate the action identity. */
+  downloadUrl?: string;
+
   /** Semantic document name — used as the download filename (sanitized).
    *  See `FlipbookProps.documentName` JSDoc for the display-vs-filename
    *  separation rationale. When omitted, the download falls back to URL
-   *  basename → `'document'`. */
+   *  basename → `'document'`. Does not apply to the `downloadUrl` path, where
+   *  the server's header names the file. */
   documentName?: string;
 
   /** Optional children mounted inside the provider context. Public — use this
@@ -267,6 +276,7 @@ export function FlipbookProvider({
   onPrintComplete,
   onPrintError,
   onPrintAbort,
+  downloadUrl,
   documentName,
   children,
 }: FlipbookProviderProps) {
@@ -1039,6 +1049,14 @@ export function FlipbookProvider({
     documentNameRef.current = documentName;
   }, [documentName]);
 
+  // Same ref-mirror as documentName above, and for the same reason: the
+  // download action's deps stay `[source]`, so its identity does not rotate
+  // when the consumer re-renders with a freshly generated URL.
+  const downloadUrlRef = useRef(downloadUrl);
+  useIsomorphicLayoutEffect(() => {
+    downloadUrlRef.current = downloadUrl;
+  }, [downloadUrl]);
+
   const { print, cancelPrint } = usePrint({
     source,
     dispatch,
@@ -1061,6 +1079,34 @@ export function FlipbookProvider({
   }, [dispatch]);
 
   const download = useCallback((): void => {
+    // ---- Trusted path: the consumer vouched for this URL's response. ----
+    // No `download` attribute and no `target`: the server's
+    // `Content-Disposition: attachment` is what makes this a download, and the
+    // absent target is what removes the tab. The browser aborts the navigation
+    // before it commits, so this page survives — verified in Chrome, Firefox
+    // and Safari, through a 302 to a signed URL.
+    //
+    // The anchor is appended before clicking rather than left detached. A
+    // detached anchor is enough to trigger a DOWNLOAD (that is what the
+    // source-URL path below has always relied on), but this path relies on
+    // NAVIGATION, and an in-document anchor is the conservative form of that.
+    const trusted = downloadUrlRef.current?.trim();
+    if (trusted) {
+      if (!isTrustedDownloadUrl(trusted)) {
+        devWarn(
+          `[flipbook] downloadUrl must be an http(s) URL; got "${trusted}". ` +
+          'Ignoring it and falling back to the source URL.',
+        );
+      } else {
+        const trustedAnchor = document.createElement('a');
+        trustedAnchor.href = trusted;
+        document.body.appendChild(trustedAnchor);
+        trustedAnchor.click();
+        trustedAnchor.remove();
+        return;
+      }
+    }
+
     const url = source.getSourceUrl?.();
     // Symmetric with `canDownload = !!source.getSourceUrl?.()` — the action
     // and the disabled-state derivation must agree on what counts as "no URL"
@@ -1178,7 +1224,14 @@ export function FlipbookProvider({
   // — whose `getSourceUrl()` returns the constructor-set `this.url` and is
   // independent of init — this dep is a no-op: the boolean value doesn't
   // change across the loading→ready transition.
-  const canDownload = useMemo(() => !!source.getSourceUrl?.(), [source, sourceStatus]);
+  // A trusted downloadUrl enables the control on its own — it does not need the
+  // source to expose a URL, so a Uint8Array-backed document can still offer a
+  // download. Whitespace-only is treated as absent, matching the `?.trim()` the
+  // action body applies before using it.
+  const canDownload = useMemo(
+    () => !!downloadUrl?.trim() || !!source.getSourceUrl?.(),
+    [downloadUrl, source, sourceStatus],
+  );
 
   const helpers = useMemo<FlipbookHookHelpers>(() => ({
     canDownload,

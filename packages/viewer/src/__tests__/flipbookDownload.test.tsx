@@ -229,3 +229,147 @@ describe('Flipbook download end-to-end', () => {
     expect(clickedAnchor!.download).toBe('Second.pdf');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Trusted download path (`downloadUrl`).
+//
+// Every test above passes no `downloadUrl`, so each one exercises the
+// unchanged source-URL path — that is the regression proof for it, and none of
+// them were modified here.
+//
+// Attributes are read with getAttribute/hasAttribute rather than the IDL
+// properties: `a.target` and `a.download` both read `''` whether the attribute
+// is absent or present-but-empty, so the properties cannot tell the two paths
+// apart.
+// ---------------------------------------------------------------------------
+describe('Flipbook download — trusted downloadUrl', () => {
+  const TRUSTED = 'https://cdn.example.com/signed/annual-report.pdf';
+
+  // 9
+  it('navigates with no target and no download attribute', async () => {
+    render(<Flipbook source={new PdfjsSource('/doc.pdf')} downloadUrl={TRUSTED} />);
+    await waitFor(() => expect(getDownloadButton()).not.toBeNull());
+    const button = getDownloadButton()!;
+    await waitFor(() => expect(button.getAttribute('aria-disabled')).not.toBe('true'));
+    await act(async () => { fireEvent.click(button); });
+    expect(clickedAnchor).toBeDefined();
+    expect(clickedAnchor!.href).toBe(TRUSTED);
+    expect(clickedAnchor!.getAttribute('target')).toBeNull();
+    expect(clickedAnchor!.hasAttribute('download')).toBe(false);
+    expect(clickedAnchor!.getAttribute('rel')).toBeNull();
+  });
+
+  // 10
+  it('wins over source.getSourceUrl()', async () => {
+    const source = new PdfjsSource('/from-the-source.pdf');
+    render(<Flipbook source={source} downloadUrl={TRUSTED} />);
+    await waitFor(() => expect(getDownloadButton()).not.toBeNull());
+    const button = getDownloadButton()!;
+    await waitFor(() => expect(button.getAttribute('aria-disabled')).not.toBe('true'));
+    await act(async () => { fireEvent.click(button); });
+    expect(clickedAnchor!.href).toBe(TRUSTED);
+    expect(clickedAnchor!.href).not.toContain('from-the-source');
+  });
+
+  // 11
+  // The ordering guard: if the trusted block sat below the `if (!url) return`
+  // no-URL check, this source would warn and bail before downloadUrl was ever
+  // read, and the button would be disabled.
+  it('enables the control for a source that exposes no URL of its own', async () => {
+    const sourceWithoutGetSourceUrl: PageSource = {
+      init: () => Promise.resolve(),
+      getPageCount: () => 1,
+      getPageSize: () => ({ width: 612, height: 792 }),
+      renderPage: () => Promise.resolve(document.createElement('canvas')),
+      dispose: () => {},
+    };
+    render(<Flipbook source={sourceWithoutGetSourceUrl} downloadUrl={TRUSTED} />);
+    await waitFor(() => expect(getDownloadButton()).not.toBeNull());
+    const button = getDownloadButton()!;
+    await waitFor(() => expect(button.getAttribute('aria-disabled')).not.toBe('true'));
+    await act(async () => { fireEvent.click(button); });
+    expect(clickedAnchor!.href).toBe(TRUSTED);
+  });
+
+  // 12
+  it('whitespace-only downloadUrl is ignored and the source URL is used', async () => {
+    render(<Flipbook source={new PdfjsSource('/doc.pdf')} downloadUrl="   " />);
+    await waitFor(() => expect(getDownloadButton()).not.toBeNull());
+    const button = getDownloadButton()!;
+    await waitFor(() => expect(button.getAttribute('aria-disabled')).not.toBe('true'));
+    await act(async () => { fireEvent.click(button); });
+    expect(clickedAnchor!.href).toMatch(/\/doc\.pdf$/);
+    expect(clickedAnchor!.getAttribute('target')).toBe('_blank');
+  });
+
+  // 13
+  it('a javascript: downloadUrl is refused with a devWarn and falls through', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const actionsRef = { current: null as FlipbookHookActions | null };
+    render(
+      <FlipbookProvider source={new PdfjsSource('/doc.pdf')} downloadUrl="javascript:alert(1)">
+        <CaptureActions ref={actionsRef} />
+      </FlipbookProvider>,
+    );
+    act(() => { actionsRef.current!.download(); });
+    expect(String(warnSpy.mock.calls.at(-1)?.[0] ?? '')).toContain('downloadUrl must be an http(s) URL');
+    // Fell through to the source-URL path rather than doing nothing.
+    expect(clickedAnchor).toBeDefined();
+    expect(clickedAnchor!.href).toMatch(/\/doc\.pdf$/);
+    expect(clickedAnchor!.getAttribute('target')).toBe('_blank');
+  });
+
+  // 14
+  it('documentName does not affect the trusted path — the server names the file', async () => {
+    render(
+      <Flipbook source={new PdfjsSource('/doc.pdf')} downloadUrl={TRUSTED} documentName="My Report" />,
+    );
+    await waitFor(() => expect(getDownloadButton()).not.toBeNull());
+    const button = getDownloadButton()!;
+    await waitFor(() => expect(button.getAttribute('aria-disabled')).not.toBe('true'));
+    await act(async () => { fireEvent.click(button); });
+    expect(clickedAnchor!.hasAttribute('download')).toBe(false);
+    expect(clickedAnchor!.href).toBe(TRUSTED);
+  });
+
+  // 15a
+  // Test 12 cannot see the `?.trim()` in the canDownload derivation, because
+  // its source supplies a URL and the control is enabled either way. This is
+  // the case that isolates it: with no source URL, a whitespace-only
+  // downloadUrl must leave the control DISABLED rather than enabling a button
+  // whose click can only no-op.
+  it('whitespace-only downloadUrl does not enable the control on its own', async () => {
+    const sourceWithoutGetSourceUrl: PageSource = {
+      init: () => Promise.resolve(),
+      getPageCount: () => 1,
+      getPageSize: () => ({ width: 612, height: 792 }),
+      renderPage: () => Promise.resolve(document.createElement('canvas')),
+      dispose: () => {},
+    };
+    render(<Flipbook source={sourceWithoutGetSourceUrl} downloadUrl="   " showDownload />);
+    await waitFor(() => expect(getDownloadButton()).not.toBeNull());
+    expect(getDownloadButton()!.getAttribute('aria-disabled')).toBe('true');
+  });
+
+  // 15
+  it('downloadUrl rerender does NOT rotate actions.download identity', () => {
+    const source = new PdfjsSource('/doc.pdf');
+    const actionsRef = { current: null as FlipbookHookActions | null };
+    const { rerender } = render(
+      <FlipbookProvider source={source} downloadUrl="https://cdn.example.com/first.pdf">
+        <CaptureActions ref={actionsRef} />
+      </FlipbookProvider>,
+    );
+    const download1 = actionsRef.current!.download;
+    rerender(
+      <FlipbookProvider source={source} downloadUrl="https://cdn.example.com/second.pdf">
+        <CaptureActions ref={actionsRef} />
+      </FlipbookProvider>,
+    );
+    const download2 = actionsRef.current!.download;
+    expect(download1).toBe(download2);
+    // The ref-mirror still serves the latest value on the next call.
+    act(() => { download2(); });
+    expect(clickedAnchor!.href).toBe('https://cdn.example.com/second.pdf');
+  });
+});

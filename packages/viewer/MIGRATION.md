@@ -337,6 +337,28 @@ How this works:
 
 ## 9. Download integration
 
+### 9.0 Two download paths — `downloadUrl` vs the source URL
+
+`actions.download()` takes one of two paths.
+
+**The trusted path** runs when `downloadUrl` is set. The viewer navigates to that URL with no `download` attribute and no `target`, and the server's `Content-Disposition: attachment` is what turns the navigation into a download. The browser aborts the navigation before it commits, so the reader stays on the flipbook; the transfer, its progress indicator, and its cancel and retry controls all belong to the browser. Nothing is buffered in the page.
+
+**The source-URL path** runs otherwise, and is unchanged from `4.2.0` and earlier: an anchor carrying `download`, `target="_blank"` and `rel="noopener"`. For a same-origin URL the browser honours `download` and the target is a no-op. For a **cross-origin** URL the browser ignores `download` per the HTML spec and navigates instead — the target is what keeps that navigation out of the reader's tab, at the cost of a new one opening.
+
+That cross-origin case is why `downloadUrl` exists. There is no way for the viewer to make `download` work cross-origin, and no way for it to detect whether a given URL returns an attachment — only the server knows. So the consumer declares it.
+
+**The declaration is a contract the viewer cannot check.** A `downloadUrl` whose final response — after any redirect — is an inline PDF or an error page will REPLACE the flipbook view, because the navigation then commits normally. Verify the last hop, not the first. Only `http:` and `https:` URLs are honoured; anything else is ignored with a dev warning and the source-URL path runs instead.
+
+```tsx
+<Flipbook
+  source={source}
+  downloadUrl={doc.downloadUrl}   // server guarantees Content-Disposition: attachment
+  documentName={doc.title}        // still governs the source-URL fallback
+/>
+```
+
+`helpers.canDownload` is true when either a `downloadUrl` or a source URL is available, so a document whose source exposes no URL of its own (a `Uint8Array`, for instance) can still offer a download.
+
 ### 9.1 documentName + filename sanitization
 
 `documentName` is the semantic filename prop (distinct from display-only `title`). The library applies `sanitizeFilename` (strips OS-illegal chars, caps at 200 chars, ensures single `.pdf` extension). Consumer-side analytics for download clicks go via `<DownloadButton onClick={...} />`.
@@ -437,6 +459,7 @@ The `2.0.0` migration plan will ship with a separate MIGRATION-v2.md guide listi
 - **`PdfjsSourceOptions.linkDiagnostics?: boolean`** (added in `3.4.0`) — When `true`, `PdfjsSource.getLinks()` emits per-link `console.warn` messages for each dropped annotation with the drop reason (`non-Link`, `action:JavaScript`, `scheme-blocked`, `rect-non-finite`, `dest-unresolved`, etc.). Off by default. Dev-mode (`NODE_ENV !== 'production'`) always emits a per-call SUMMARY warn when drops occurred; this option adds per-link DETAIL in both dev and prod. Diagnose specific "the link on page N doesn't work" reports without shipping a debug build.
 - **`PdfjsSourceOptions.additionalLinkSchemes?: readonly string[]`** (added in `3.4.0`) — Merged with the default URL-scheme allowlist (`https:`, `http:`, `mailto:`, `tel:`). Use for intranet / custom-scheme link support (`slack:`, `intranet:`, `app:`, etc.). Matched case-insensitively. Cannot re-enable `javascript:`, `data:`, `vbscript:`, `file:` — those are hardcoded-forbidden regardless of what appears in this array.
 - **`FlipbookProps.showLinks?: boolean`** (added in `3.4.0`) — Default `true`. Set `false` to disable the automatic link overlay on all pages. Useful for consumers with custom link UI or those who don't want overlays on top of a `PreRenderedPageSource` that already implements `getLinks()`.
+- **`FlipbookProps.downloadUrl?: string`** (added in `4.3.0`) — A URL whose response the consumer guarantees carries `Content-Disposition: attachment`. When set, `actions.download()` navigates to it with no `download` attribute and no `target`, so the browser downloads natively and no tab opens; when unset, the download behaves exactly as it did in `4.2.0`. Takes precedence over `source.getSourceUrl()`, and widens `helpers.canDownload` so a source with no URL of its own can still offer a download. `documentName` does not apply to this path — the server's header names the file. Only `http:` and `https:` are honoured; anything else is ignored with a dev warning and the source-URL path runs instead. **The guarantee is not checkable by the viewer**: a URL whose final response after redirects is an inline PDF or an error page will replace the flipbook view. See §9.0 for the full contract. Covered by `1.x` additive-evolution rules from `4.3.0` forward.
 - **`FlipbookProps.printOrientation?: 'auto' | 'none'`** (added in `4.2.0`) — Controls whether printing may set the paper orientation from the document. Default `'auto'`: when every page is wider than it is tall, the print job asks for landscape paper. `'none'` disables it and restores the pre-`4.2.0` behaviour. Portrait, square and mixed-orientation documents are unaffected either way. See the behavior-change entry above for the print-dialog consequence.
 
 ### What's deferred to a future MINOR release (not breaking)

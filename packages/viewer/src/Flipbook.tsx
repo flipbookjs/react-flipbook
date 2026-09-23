@@ -179,6 +179,24 @@ interface FlipbookCommonProps {
   /** Fires when an in-flight print is aborted by unmount or source change. */
   onPrintAbort?: (info: { reason: 'unmount' | 'source-change' | 'user-cancel' }) => void;
 
+  /** A URL whose response the consumer guarantees carries
+   *  `Content-Disposition: attachment`. When present the viewer navigates to it
+   *  directly — no `download` attribute, no new tab — so the browser downloads
+   *  natively, shows its own progress, and names the file from the server's
+   *  header. This is the way to avoid the new tab a cross-origin download
+   *  otherwise opens, because `download` is ignored cross-origin.
+   *
+   *  Takes precedence over `source.getSourceUrl()`, and enables the Download
+   *  control on its own — a source with no URL of its own still gets one.
+   *  `documentName` does not apply to it.
+   *
+   *  The guarantee is not checkable from here. A URL that returns an inline PDF
+   *  or an error page will REPLACE the flipbook view, so only set this for an
+   *  endpoint whose final response — after any redirect — has been verified.
+   *  Only `http:` and `https:` are honoured; anything else is ignored with a
+   *  dev warning and the source URL is used instead. */
+  downloadUrl?: string;
+
   // ---- NEW in 1.0.0 ----
 
   /** Initial interaction mode. `'pan'` for hand-drag panning, `'select'` for
@@ -341,6 +359,7 @@ export function Flipbook({
   onPrintComplete,
   onPrintError,
   onPrintAbort,
+  downloadUrl,
   showEdgeArrows = true,
 }: FlipbookProps) {
   // Both-supplied dev-warn (Flipbook surface). TypeScript prevents this
@@ -503,6 +522,7 @@ export function Flipbook({
       onPrintError={onPrintError}
       onPrintAbort={onPrintAbort}
       documentName={documentName}
+      downloadUrl={downloadUrl}
     >
       {children}
     </FlipbookProvider>
